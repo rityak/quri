@@ -19,6 +19,26 @@ import (
 // Serve accepts at most 64 concurrent local clients. Canceling ctx closes the
 // listener and active connections, including UDP associations.
 func Serve(ctx context.Context, listener net.Listener, session *quri.Session) error {
+	return ServeClient(ctx, listener, legacySession{session})
+}
+
+// Client opens flows without exposing transport or session implementation details.
+type Client interface {
+	DialContext(context.Context, string) (net.Conn, error)
+	ListenPacket(context.Context) (net.PacketConn, error)
+}
+
+type legacySession struct{ *quri.Session }
+
+func (s legacySession) DialContext(ctx context.Context, address string) (net.Conn, error) {
+	return s.Session.DialContext(ctx, address)
+}
+func (s legacySession) ListenPacket(ctx context.Context) (net.PacketConn, error) {
+	return s.Session.ListenPacket(ctx)
+}
+
+// ServeClient accepts loopback SOCKS5 connections using the current HTTP client.
+func ServeClient(ctx context.Context, listener net.Listener, session Client) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	host, _, err := net.SplitHostPort(listener.Addr().String())
@@ -71,7 +91,7 @@ func Serve(ctx context.Context, listener net.Listener, session *quri.Session) er
 	}
 }
 
-func serveConn(ctx context.Context, c net.Conn, session *quri.Session) {
+func serveConn(ctx context.Context, c net.Conn, session Client) {
 	c.SetDeadline(time.Now().Add(5 * time.Second))
 	var h [2]byte
 	if _, err := io.ReadFull(c, h[:]); err != nil || h[0] != 5 || h[1] == 0 {
@@ -208,7 +228,7 @@ func reply(w io.Writer, code byte, addr net.Addr) error {
 	return err
 }
 
-func serveUDP(ctx context.Context, c net.Conn, session *quri.Session, requested string) {
+func serveUDP(ctx context.Context, c net.Conn, session Client, requested string) {
 	sourceHost, _, _ := net.SplitHostPort(c.RemoteAddr().String())
 	sourceIP := net.ParseIP(sourceHost)
 	host, service, err := net.SplitHostPort(requested)
