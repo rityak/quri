@@ -1,0 +1,13 @@
+{
+  "mode": "server",
+  "listen": "0.0.0.0:443",
+  "domain": "relay.example",
+  "acme_cache": "/var/lib/quri-relay/acme",
+  "acme_email": "owner@example.org",
+  "website": "http://127.0.0.1:8080",
+  "tokens": {
+    "owner": ""
+  },
+  "allow": ["0.0.0.0/0", "::/0"],
+  "allow_client_upstream": false
+}

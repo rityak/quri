@@ -3,8 +3,10 @@ module github.com/rityak/quri
 go 1.22
 
 require (
+	github.com/liyue201/goqr v0.0.0-20200803022322-df443203d4ea
 	github.com/metacubex/quic-go v0.61.1-0.20260727080200-2548683b76f4
 	github.com/metacubex/tls v0.1.9
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	go.uber.org/goleak v1.3.0
 	golang.org/x/net v0.35.0
 	golang.org/x/sync v0.11.0
