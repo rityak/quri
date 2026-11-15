@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"net"
+	"net/netip"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -73,8 +74,8 @@ func TestICMPUsesBoundedAuthenticatedVerification(t *testing.T) {
 				}
 			}()
 			var socket *refusedSocket
-			conn, err := Dial(ctx, tcp.Addr().String(), ClientOptions{TLS: clientTLS, Protocol: "h3", Limits: config.Config{OpenTimeout: 150 * time.Millisecond}, ListenPacket: func(ctx context.Context, network string) (net.PacketConn, error) {
-				pc, err := net.ListenPacket(network, "127.0.0.1:0")
+			conn, err := Dial(ctx, tcp.Addr().String(), ClientOptions{TLS: clientTLS, Protocol: "h3", Limits: config.Config{OpenTimeout: 150 * time.Millisecond}, ListenPacket: func(ctx context.Context, remote netip.AddrPort) (net.PacketConn, error) {
+				pc, err := net.ListenPacket("udp", "127.0.0.1:0")
 				if err != nil {
 					return nil, err
 				}

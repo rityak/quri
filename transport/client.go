@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"net/netip"
 	"net/url"
 	"sync"
 	"sync/atomic"
@@ -29,7 +30,7 @@ type ClientOptions struct {
 	Protocol     string
 	Limits       config.Config
 	DialContext  func(context.Context, string, string) (net.Conn, error)
-	ListenPacket func(context.Context, string) (net.PacketConn, error)
+	ListenPacket func(context.Context, netip.AddrPort) (net.PacketConn, error)
 }
 
 // Conn is one authenticated HTTP connection; requests never use a connection pool.
@@ -104,7 +105,7 @@ func Dial(ctx context.Context, address string, options ClientOptions) (*Conn, er
 			return nil, err
 		}
 		if options.ListenPacket != nil {
-			c.socket, err = options.ListenPacket(dialCtx, remote.Network())
+			c.socket, err = options.ListenPacket(dialCtx, remote.AddrPort())
 		} else {
 			c.socket, err = net.ListenPacket(remote.Network(), "")
 		}

@@ -67,8 +67,8 @@ func TestBlockedUDPUsesH2AndRebindsAssociation(t *testing.T) {
 	}()
 	var closed atomic.Int64
 	started := time.Now()
-	m, err := Dial(ctx, Config{Address: listener.Addr().String(), Token: token, Configuration: session.Request{Namespace: "direct", Version: 1}, Transport: transport.ClientOptions{TLS: clientTLS, ListenPacket: func(ctx context.Context, network string) (net.PacketConn, error) {
-		socket, err := net.ListenPacket(network, "127.0.0.1:0")
+	m, err := Dial(ctx, Config{Address: listener.Addr().String(), Token: token, Configuration: session.Request{Namespace: "direct", Version: 1}, Transport: transport.ClientOptions{TLS: clientTLS, ListenPacket: func(ctx context.Context, remote netip.AddrPort) (net.PacketConn, error) {
+		socket, err := net.ListenPacket("udp", "127.0.0.1:0")
 		if err != nil {
 			return nil, err
 		}
