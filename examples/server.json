@@ -1,0 +1,8 @@
+{
+  "mode": "server",
+  "listen": "127.0.0.1:3443",
+  "certificate": "server.pem",
+  "key": "server-key.pem",
+  "token": "",
+  "allow": ["127.0.0.0/8", "::1/128"]
+}

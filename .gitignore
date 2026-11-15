@@ -1,0 +1,7 @@
+go.work
+go.work.sum
+/quri
+/quri.exe
+*.key
+examples/*.pem
+examples/*.local.json
