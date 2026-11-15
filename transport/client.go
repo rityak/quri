@@ -105,7 +105,9 @@ func Dial(ctx context.Context, address string, options ClientOptions) (*Conn, er
 			return nil, err
 		}
 		if options.ListenPacket != nil {
-			c.socket, err = options.ListenPacket(dialCtx, remote.AddrPort())
+			endpoint := remote.AddrPort()
+			endpoint = netip.AddrPortFrom(endpoint.Addr().Unmap(), endpoint.Port())
+			c.socket, err = options.ListenPacket(dialCtx, endpoint)
 		} else {
 			c.socket, err = net.ListenPacket(remote.Network(), "")
 		}

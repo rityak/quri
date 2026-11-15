@@ -136,6 +136,7 @@ func (m *Manager) candidates(ctx context.Context) ([]candidate, error) {
 	}
 	var v4, v6 []netip.Addr
 	for _, ip := range ips {
+		ip = ip.Unmap()
 		if ip.IsValid() {
 			if ip.Is4() {
 				v4 = append(v4, ip)
