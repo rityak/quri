@@ -37,6 +37,11 @@ type ClientConfig struct {
 	Token         string
 	Configuration Request
 	PacketConn    net.PacketConn
+	// Ports adds alternative ports on the same server for connection establishment.
+	Ports []uint16
+	// Resolve and ListenPacket let a host preserve its DNS and socket routing policy.
+	Resolve func(context.Context, string) ([]netip.Addr, error)
+	ListenPacket func(context.Context, netip.AddrPort) (net.PacketConn, error)
 	// Application handles server-initiated messages from the verified peer.
 	Application func(context.Context, Request) ([]byte, error)
 }
@@ -104,6 +109,17 @@ type Session struct {
 	closeOnce      sync.Once
 	finished       chan struct{}
 	udpIdleTimeout time.Duration
+	refused        chan struct{}
+}
+
+// Done is closed when the connection terminates. Wait also waits for cleanup.
+func (s *Session) Done() <-chan struct{} { return s.conn.Context().Done() }
+
+// Probe verifies a round trip on the authenticated control stream without
+// invoking a host callback or applying configuration again.
+func (s *Session) Probe(ctx context.Context) error {
+	_, err := s.request(ctx, 0x40, Request{Namespace: "quri.probe", Version: 1})
+	return err
 }
 
 func quicConfig() *quic.Config {
@@ -139,69 +155,52 @@ func Dial(ctx context.Context, address string, cfg ClientConfig) (*Session, erro
 	tc.NextProtos = []string{alpn}
 	tc.MinVersion = tls.VersionTLS13
 	tc.ClientSessionCache = nil
-	pc := cfg.PacketConn
-	if pc == nil {
-		var err error
-		pc, err = net.ListenUDP("udp", nil)
-		if err != nil {
-			return nil, err
-		}
-	}
-	tr := &quic.Transport{Conn: pc}
-	fail := func() { tr.Close(); pc.Close() }
 	host, service, err := net.SplitHostPort(address)
 	if err != nil {
-		fail()
 		return nil, err
 	}
 	port, err := strconv.Atoi(service)
 	if err != nil || port < 1 || port > 65535 {
-		fail()
 		return nil, ErrProtocol
 	}
-	ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-	if err != nil {
-		fail()
-		return nil, err
-	}
-	if len(ips) == 0 {
-		fail()
-		return nil, ErrDenied
-	}
-	ip := ips[0]
-	for _, candidate := range ips {
-		if candidate.Is4() {
-			ip = candidate
-			break
-		}
-	}
-	addr := net.UDPAddrFromAddrPort(netip.AddrPortFrom(ip, uint16(port)))
 	if tc.ServerName == "" {
-		tc.ServerName, _, err = net.SplitHostPort(address)
-		if err != nil {
-			fail()
-			return nil, err
-		}
+		tc.ServerName = host
 	}
 	qc := quicConfig()
 	qc.MaxIncomingStreams = -1
-	c, err := tr.Dial(ctx, addr, tc, qc)
+	var active atomic.Pointer[Session]
+	qc.ConnectionRefused = func() bool {
+		s := active.Load()
+		if s == nil {
+			return false
+		}
+		select {
+		case <-s.Done():
+			return false
+		default:
+		}
+		select {
+		case s.refused <- struct{}{}:
+		default:
+		}
+		return true
+	}
+	c, tr, pc, err := dialTransport(ctx, host, uint16(port), tc, qc, cfg)
 	if err != nil {
-		fail()
 		return nil, err
 	}
+	fail := func() { tr.Close(); pc.Close() }
 	failConn := func() { c.CloseWithError(1, "handshake failed"); fail() }
-	control, err := c.OpenStreamSync(ctx)
+	helloCtx, cancelHello := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelHello()
+	control, err := c.OpenStreamSync(helloCtx)
 	if err != nil {
 		failConn()
 		return nil, err
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
-		deadline = d
-	}
+	deadline, _ := helloCtx.Deadline()
 	control.SetDeadline(deadline)
-	stopWatch := watchCancellation(ctx, control.SetDeadline)
+	stopWatch := watchCancellation(helloCtx, control.SetDeadline)
 	defer stopWatch()
 	if err = writeJSON(control, hello{Version: 1, Token: cfg.Token, UDP: true}, maxOpen); err != nil {
 		failConn()
@@ -227,6 +226,7 @@ func Dial(ctx context.Context, address string, cfg ClientConfig) (*Session, erro
 	s.transport = tr
 	s.socket = pc
 	s.application = cfg.Application
+	s.refused = make(chan struct{}, 1)
 	s.start()
 	data, err := s.request(ctx, configureKind, cfg.Configuration)
 	if err != nil {
@@ -238,6 +238,7 @@ func Dial(ctx context.Context, address string, cfg ClientConfig) (*Session, erro
 		s.Close()
 		return nil, ErrProtocol
 	}
+	active.Store(s)
 	return s, nil
 }
 
@@ -248,6 +249,9 @@ func (s *Session) start() {
 	if s.server != nil {
 		s.wg.Add(1)
 		go func() { defer s.wg.Done(); s.acceptStreams() }()
+	} else {
+		s.wg.Add(1)
+		go func() { defer s.wg.Done(); s.verifyPath() }()
 	}
 	go func() {
 		<-s.conn.Context().Done()
@@ -259,6 +263,31 @@ func (s *Session) start() {
 		}
 		close(s.finished)
 	}()
+}
+
+func (s *Session) verifyPath() {
+	for {
+		select {
+		case <-s.Done():
+			return
+		case <-s.refused:
+		}
+		ctx, cancel := context.WithTimeout(s.conn.Context(), 5*time.Second)
+		err := s.Probe(ctx)
+		cancel()
+		if err != nil {
+			s.Close()
+			return
+		}
+		// A burst of stale ICMP must not turn into a burst of control requests.
+		timer := time.NewTimer(time.Second)
+		select {
+		case <-s.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+	}
 }
 
 func (s *Session) notifyLocked() { close(s.changed); s.changed = make(chan struct{}) }
@@ -558,6 +587,8 @@ func (s *Session) handleRequest(ctx context.Context, kind byte, req Request) res
 }
 
 func (s *Session) open(ctx context.Context, kind, address string) (*quic.Stream, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	if kind == "tcp" {
 		if err := validAddress(address); err != nil {
 			if ctx.Err() != nil {

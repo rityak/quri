@@ -87,15 +87,18 @@ func Relay(left, right net.Conn) error {
 	done := make(chan error, 1)
 	copyHalf := func(dst, src net.Conn) error {
 		_, err := io.Copy(dst, src)
+		if err == nil {
+			if w, ok := dst.(interface{ CloseWrite() error }); ok {
+				err = w.CloseWrite()
+			} else {
+				err = dst.Close()
+			}
+		}
 		if err != nil {
 			dst.Close()
 			src.Close()
-			return err
 		}
-		if w, ok := dst.(interface{ CloseWrite() error }); ok {
-			return w.CloseWrite()
-		}
-		return dst.Close()
+		return err
 	}
 	go func() { done <- copyHalf(left, right) }()
 	err := copyHalf(right, left)

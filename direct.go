@@ -33,7 +33,9 @@ func NewDirectRoute(policy DirectPolicy) (*DirectRoute, error) {
 	return &DirectRoute{policy: DirectPolicy{Allowed: append([]netip.Prefix(nil), policy.Allowed...), Denied: append([]netip.AddrPort(nil), policy.Denied...)}}, nil
 }
 
-func (r *DirectRoute) resolve(ctx context.Context, address string) (netip.AddrPort, error) {
+// Resolve authorizes a destination and returns its checked numeric endpoint.
+// Proxy hosts must use that endpoint without resolving the name again.
+func (r *DirectRoute) Resolve(ctx context.Context, address string) (netip.AddrPort, error) {
 	if err := validAddress(address); err != nil {
 		return netip.AddrPort{}, err
 	}
@@ -126,7 +128,7 @@ func (p *directPacket) WriteTo(b []byte, addr net.Addr) (int, error) {
 	}
 	ctx, cancel := context.WithDeadline(context.Background(), deadline)
 	defer cancel()
-	endpoint, err := p.route.resolve(ctx, addr.String())
+	endpoint, err := p.route.Resolve(ctx, addr.String())
 	if err != nil {
 		return 0, err
 	}

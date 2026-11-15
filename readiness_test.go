@@ -219,7 +219,7 @@ func TestReadinessSoak(t *testing.T) {
 	}
 	serverTLS, clientTLS := testcert.TLS(t)
 	tokens := make(map[Principal]string)
-	for i := 0; i < 16; i++ {
+	for i := 0; i < 17; i++ {
 		tokens[Principal(fmt.Sprint(i))] = strings.Repeat(fmt.Sprintf("%02d", i), 24)
 	}
 	auth, err := TokenAuthenticator(tokens)
@@ -268,7 +268,7 @@ func TestReadinessSoak(t *testing.T) {
 		t.Fatal(err)
 	}
 	admission, stop := context.WithTimeout(ctx, time.Second)
-	extra, err := Dial(admission, srv.Addr().String(), ClientConfig{TLS: clientTLS, Token: tokens["0"], PacketConn: pc, Configuration: Request{Namespace: "direct", Version: 1}})
+	extra, err := Dial(admission, srv.Addr().String(), ClientConfig{TLS: clientTLS, Token: tokens["16"], PacketConn: pc, Configuration: Request{Namespace: "direct", Version: 1}})
 	stop()
 	if err == nil {
 		extra.Close()
