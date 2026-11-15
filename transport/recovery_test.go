@@ -24,7 +24,7 @@ type refusedSocket struct {
 func (s *refusedSocket) ReadFrom(b []byte) (int, net.Addr, error) {
 	n, addr, err := s.PacketConn.ReadFrom(b)
 	if s.refused.Swap(false) {
-		if err := s.PacketConn.SetReadDeadline(time.Time{}); err != nil {
+		if err := s.SetReadDeadline(time.Time{}); err != nil {
 			return 0, nil, err
 		}
 		return 0, nil, &net.OpError{Op: "read", Net: "udp", Err: syscall.ECONNREFUSED}
