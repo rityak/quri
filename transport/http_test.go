@@ -20,11 +20,7 @@ func TestHTTPWebsiteAndAuthenticatedTunnel(t *testing.T) {
 	for _, protocol := range []string{"h3", "h2"} {
 		t.Run(protocol, func(t *testing.T) {
 			serverTLS, clientTLS := testcert.TLS(t)
-			tcp, err := net.Listen("tcp", "127.0.0.1:0")
-			if err != nil {
-				t.Fatal(err)
-			}
-			udp, err := net.ListenPacket("udp", tcp.Addr().String())
+			tcp, udp, err := ListenSockets("127.0.0.1:0")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -34,7 +30,7 @@ func TestHTTPWebsiteAndAuthenticatedTunnel(t *testing.T) {
 				t.Fatal(err)
 			}
 			upload := make(chan string, 1)
-			server, err := NewServer(tcp, udp, ServerOptions{TLS: serverTLS, Auth: verifier, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server, err := NewServer(tcp, udp, ServerOptions{TLS: serverTLS, Auth: verifier, Website: testWebsite(), Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if PeerFromContext(r.Context()).Principal() != testPrincipal {
 					t.Error("missing connection identity")
 				}
@@ -133,4 +129,12 @@ func closeTest(t testing.TB, c io.Closer) {
 	if err := c.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 		t.Error(err)
 	}
+}
+
+func testWebsite() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.WriteString(w, "<!doctype html><title>Test website</title>"); err != nil {
+			return
+		}
+	})
 }

@@ -84,10 +84,14 @@ func Dial(ctx context.Context, cfg Config) (*Manager, error) {
 	}
 	cfg.Ports = append([]uint16(nil), cfg.Ports...)
 	cfg.Transports = append([]string(nil), cfg.Transports...)
+	cfg.Configuration.Payload = append([]byte(nil), cfg.Configuration.Payload...)
 	if cfg.Transport.TLS == nil {
 		return nil, errors.New("verified TLS is required")
 	}
 	cfg.Transport.TLS = cfg.Transport.TLS.Clone()
+	if cfg.Transport.TLS.RootCAs != nil {
+		cfg.Transport.TLS.RootCAs = cfg.Transport.TLS.RootCAs.Clone()
+	}
 	host, _, err := net.SplitHostPort(cfg.Address)
 	if err != nil {
 		return nil, err

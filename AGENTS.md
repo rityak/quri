@@ -1,7 +1,7 @@
 # Project instructions
 
 - Respond in Russian by default. Code, identifiers, comments and docstrings must be in English.
-- Read README.md, PROTOCOL.md and RFC-AUDIT.md before changing transport behavior.
+- Read README.md and PROTOCOL.md before changing transport behavior.
 - Preserve the independent SDK: production packages must not import miray.
 - Reuse the pinned rityak forks; keep upstream module import paths and explicit published replaces.
 - Validate changes with `go test ./...` and `go vet ./...`; run `go test -race ./...` on Linux for lifecycle/concurrency changes. Independent-peer tests live in the separate `interop` module.

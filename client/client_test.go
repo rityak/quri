@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"errors"
+	mhttp "github.com/metacubex/http"
 	"io"
 	"net"
 	"net/netip"
@@ -34,11 +35,7 @@ func TestBlockedUDPUsesH2AndRebindsAssociation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	serverTLS, clientTLS := testcert.TLS(t)
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	udp, err := net.ListenPacket("udp", listener.Addr().String())
+	listener, udp, err := transport.ListenSockets("127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +52,7 @@ func TestBlockedUDPUsesH2AndRebindsAssociation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server, err := transport.NewServer(listener, udp, transport.ServerOptions{TLS: serverTLS, Auth: verifier, Handler: handler})
+	server, err := transport.NewServer(listener, udp, transport.ServerOptions{TLS: serverTLS, Auth: verifier, Website: mhttp.NotFoundHandler(), Handler: handler})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,6 +8,8 @@ import (
 
 // Defaults apply to both HTTP transports.
 const (
+	// ControlPath is shared by the authenticated configuration and health endpoints.
+	ControlPath             = "/api/session"
 	DefaultHandshakeTimeout = 5 * time.Second
 	DefaultOpenTimeout      = 5 * time.Second
 	DefaultIdleTimeout      = 60 * time.Second
@@ -25,16 +27,16 @@ const (
 // Config bounds independently owned connections, streams and UDP queues.
 // Call WithDefaults before Validate when reading optional user settings.
 type Config struct {
-	HandshakeTimeout time.Duration
-	OpenTimeout      time.Duration
-	IdleTimeout      time.Duration
-	FallbackDelay    time.Duration
-	MaxConnections   int
-	MaxStreams       int
-	MaxUDPTargets    int
-	MaxDatagram      int
-	MaxControl       int
-	QueueSize        int
+	HandshakeTimeout time.Duration `json:"handshake_timeout_ns"`
+	OpenTimeout      time.Duration `json:"open_timeout_ns"`
+	IdleTimeout      time.Duration `json:"idle_timeout_ns"`
+	FallbackDelay    time.Duration `json:"fallback_delay_ns"`
+	MaxConnections   int           `json:"max_connections"`
+	MaxStreams       int           `json:"max_streams"`
+	MaxUDPTargets    int           `json:"max_udp_targets"`
+	MaxDatagram      int           `json:"max_datagram"`
+	MaxControl       int           `json:"max_control"`
+	QueueSize        int           `json:"queue_size"`
 }
 
 // WithDefaults returns a value snapshot with zero fields replaced.

@@ -6,9 +6,9 @@ import (
 	"io"
 	"net"
 	"net/url"
-	"strconv"
-	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/metacubex/http"
 	"github.com/metacubex/http/http2"
@@ -17,6 +17,8 @@ import (
 	"github.com/metacubex/tls"
 	"github.com/rityak/quri/auth"
 	"github.com/rityak/quri/config"
+	"github.com/rityak/quri/route"
+	"golang.org/x/sync/errgroup"
 )
 
 const authCookie = "session"
@@ -46,6 +48,11 @@ type Conn struct {
 	limits    config.Config
 	once      sync.Once
 	closeErr  error
+	lifecycle sync.Mutex
+	closed    bool
+	active    atomic.Bool
+	refused   chan struct{}
+	workers   errgroup.Group
 }
 
 func quicConfig(limits config.Config) *quic.Config {
@@ -83,7 +90,7 @@ func Dial(ctx context.Context, address string, options ClientOptions) (*Conn, er
 	dialCtx, stop := context.WithTimeout(ctx, limits.HandshakeTimeout)
 	defer stop()
 	ownedCtx, cancel := context.WithCancel(context.Background())
-	c := &Conn{ctx: ownedCtx, cancel: cancel, origin: "https://" + net.JoinHostPort(tc.ServerName, "443"), protocol: options.Protocol, limits: limits}
+	c := &Conn{ctx: ownedCtx, cancel: cancel, origin: "https://" + net.JoinHostPort(tc.ServerName, "443"), protocol: options.Protocol, limits: limits, refused: make(chan struct{}, 1)}
 	failed := true
 	defer func() {
 		if failed {
@@ -105,7 +112,19 @@ func Dial(ctx context.Context, address string, options ClientOptions) (*Conn, er
 			return nil, err
 		}
 		c.transport = &quic.Transport{Conn: c.socket}
-		c.quic, err = c.transport.Dial(dialCtx, remote, tc, quicConfig(limits))
+		c.transport.SetSingleUse(true)
+		qc := quicConfig(limits)
+		qc.ConnectionRefused = func() bool {
+			if !c.active.Load() || c.ctx.Err() != nil {
+				return false
+			}
+			select {
+			case c.refused <- struct{}{}:
+			default:
+			}
+			return true
+		}
+		c.quic, err = c.transport.Dial(dialCtx, remote, tc, qc)
 		if err != nil {
 			return nil, err
 		}
@@ -276,7 +295,7 @@ func (c *Conn) Open(ctx context.Context, target string, udp bool) (Tunnel, error
 			return nil, errors.Join(err, tunnel.Close())
 		}
 		if response.StatusCode != http.StatusOK || (udp && response.Header.Get("Capsule-Protocol") != "?1") {
-			return nil, errors.Join(errors.New("relay rejected tunnel"), tunnel.Close())
+			return nil, errors.Join(&TunnelError{Status: response.StatusCode}, tunnel.Close())
 		}
 		return tunnel, nil
 	}
@@ -293,7 +312,7 @@ func (c *Conn) Open(ctx context.Context, target string, udp bool) (Tunnel, error
 	}
 	if response.StatusCode != http.StatusOK || (udp && response.Header.Get("Capsule-Protocol") != "?1") {
 		cancelRequest()
-		return nil, errors.Join(errors.New("relay rejected tunnel"), response.Body.Close(), writer.Close())
+		return nil, errors.Join(&TunnelError{Status: response.StatusCode}, response.Body.Close(), writer.Close())
 	}
 	return newH2Tunnel(response.Body, writer, c.raw.LocalAddr(), c.raw.RemoteAddr(), cancelRequest, c.limits.MaxDatagram), nil
 }
@@ -301,7 +320,10 @@ func (c *Conn) Open(ctx context.Context, target string, udp bool) (Tunnel, error
 // Close aborts all streams and releases the owned transport and socket.
 func (c *Conn) Close() error {
 	c.once.Do(func() {
+		c.lifecycle.Lock()
+		c.closed = true
 		c.cancel()
+		c.lifecycle.Unlock()
 		var errs []error
 		if c.quic != nil {
 			errs = append(errs, c.quic.CloseWithError(0, ""))
@@ -322,28 +344,55 @@ func (c *Conn) Close() error {
 				c.closeErr = errors.Join(c.closeErr, err)
 			}
 		}
+		c.closeErr = errors.Join(c.closeErr, c.workers.Wait())
 	})
 	return c.closeErr
 }
 
-func validateTarget(target string) error {
-	if len(target) > 260 || strings.ContainsAny(target, "\x00\r\n% /?#") {
-		return errors.New("invalid tunnel target")
+// Activate starts bounded stale-ICMP verification after session configuration.
+func (c *Conn) Activate() error {
+	c.lifecycle.Lock()
+	defer c.lifecycle.Unlock()
+	if c.closed || c.ctx.Err() != nil {
+		return net.ErrClosed
 	}
-	u, err := url.Parse("https://" + target)
-	if err != nil || u.Hostname() == "" || u.Port() == "" || u.User != nil {
-		return errors.New("invalid tunnel target")
+	if c.quic == nil || c.active.Swap(true) {
+		return nil
 	}
-	port, err := strconv.Atoi(u.Port())
-	if err != nil || port < 1 || port > 65535 {
-		return errors.New("invalid target port")
-	}
+	c.workers.Go(func() error {
+		for {
+			select {
+			case <-c.ctx.Done():
+				return nil
+			case <-c.refused:
+			}
+			ctx, cancel := context.WithTimeout(c.ctx, c.limits.OpenTimeout)
+			err := c.Probe(ctx)
+			cancel()
+			if err != nil {
+				c.cancel()
+				_ = c.quic.CloseWithError(0x102, "") //nolint:errcheck // Failed path verification terminates the owned connection; Close joins this worker.
+				return nil
+			}
+			timer := time.NewTimer(time.Second)
+			select {
+			case <-c.ctx.Done():
+				timer.Stop()
+				return nil
+			case <-timer.C:
+			}
+		}
+	})
 	return nil
+}
+
+func validateTarget(target string) error {
+	return route.ValidateAddress(target)
 }
 
 // Probe confirms an authenticated HTTP round trip on the current connection.
 func (c *Conn) Probe(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, c.origin+"/", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, c.origin+config.ControlPath, nil)
 	if err != nil {
 		return err
 	}

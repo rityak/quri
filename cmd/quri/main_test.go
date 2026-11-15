@@ -89,7 +89,13 @@ func TestCLIConfigurationPipeline(t *testing.T) {
 		}
 	}
 	token := strings.Repeat("test-cli-only", 4)
-	server := start("server", configFile{Mode: "server", Listen: "127.0.0.1:0", Certificate: "server.pem", Key: "server-key.pem", Token: token, Allow: []string{"127.0.0.0/8"}}, "quri server listening on ")
+	website := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.WriteString(w, "external website"); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer website.Close()
+	server := start("server", configFile{Mode: "server", Listen: "127.0.0.1:0", Certificate: "server.pem", Key: "server-key.pem", Token: token, Website: website.URL, Allow: []string{"127.0.0.0/8"}}, "quri server listening on ")
 	socks := start("client", configFile{Mode: "client", Listen: "127.0.0.1:0", Server: server, ServerName: "localhost", CA: "server.pem", Token: token}, "quri SOCKS5 listening on ")
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, err := io.WriteString(w, "quri-cli"); err != nil {

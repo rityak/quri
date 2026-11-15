@@ -3,7 +3,6 @@ package transport
 import (
 	"context"
 	"errors"
-	"io"
 	"net"
 	"net/url"
 	"strings"
@@ -48,7 +47,7 @@ func (p *Peer) Principal() string {
 // PeerFromContext returns the connection identity attached by Server.
 func PeerFromContext(ctx context.Context) *Peer { p, _ := ctx.Value(peerKey{}).(*Peer); return p }
 
-// ServerOptions binds a static website and an authenticated relay handler.
+// ServerOptions binds an external website handler and an authenticated relay handler.
 type ServerOptions struct {
 	TLS     *tls.Config
 	Auth    *auth.Authenticator
@@ -73,15 +72,12 @@ func NewServer(tcp net.Listener, udp net.PacketConn, options ServerOptions) (*Se
 	if err := options.Limits.Validate(); err != nil {
 		return nil, err
 	}
-	if tcp == nil || udp == nil || options.TLS == nil || options.Auth == nil || options.Handler == nil || options.TLS.GetConfigForClient != nil {
+	if tcp == nil || udp == nil || options.TLS == nil || options.Auth == nil || options.Handler == nil || options.Website == nil || options.TLS.GetConfigForClient != nil {
 		return nil, errors.New("missing HTTP relay server configuration")
 	}
 	options.TLS = options.TLS.Clone()
 	options.TLS.MinVersion = tls.VersionTLS13
 	options.TLS.SessionTicketsDisabled = true
-	if options.Website == nil {
-		options.Website = http.HandlerFunc(staticWebsite)
-	}
 	s := &Server{tcp: tcp, udp: udp, options: options}
 	s.h3 = &http3.Server{TLSConfig: options.TLS, QUICConfig: quicConfig(options.Limits), EnableDatagrams: true, MaxHeaderBytes: options.Limits.MaxControl, Handler: http.HandlerFunc(s.handle)}
 	s.h3.ConnContext = func(ctx context.Context, conn *quic.Conn) context.Context {
@@ -186,25 +182,25 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 				if old := peer.principal.Load(); old == nil {
 					peer.principal.CompareAndSwap(nil, &principal)
 				}
+				copyRequest := r.Clone(r.Context())
+				copyRequest.Header.Del("Cookie")
+				for _, c := range r.Cookies() {
+					if c.Name != authCookie {
+						copyRequest.AddCookie(c)
+					}
+				}
+				r = copyRequest
 			}
 		}
 		s.options.Website.ServeHTTP(w, r)
 		return
 	}
-	if peer.Principal() == "" {
-		s.options.Website.ServeHTTP(w, r)
+	control := r.URL.Path == config.ControlPath && (r.Method == http.MethodPost || r.Method == http.MethodHead)
+	if peer.Principal() != "" && (r.Method == http.MethodConnect || control) {
+		s.options.Handler.ServeHTTP(w, r)
 		return
 	}
-	s.options.Handler.ServeHTTP(w, r)
-}
-
-func staticWebsite(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=300")
-	w.WriteHeader(http.StatusOK)
-	if r.Method != http.MethodHead {
-		_, _ = io.WriteString(w, "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>Welcome</title><body><h1>Welcome</h1><p>This website is online.</p></body></html>\n") //nolint:errcheck // The response is already committed; disconnect errors require no alternate response. The website response is committed; a client disconnect cannot be answered again.
-	}
+	s.options.Website.ServeHTTP(w, r)
 }
 
 // UDPTarget validates the default RFC 9298 URI template and protocol headers.

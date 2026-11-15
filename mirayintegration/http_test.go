@@ -2,7 +2,7 @@ package mirayintegration
 
 import (
 	"context"
-	"net"
+	mhttp "github.com/metacubex/http"
 	"net/netip"
 	"strings"
 	"testing"
@@ -68,11 +68,7 @@ func TestHTTPMirayFixedOutbound(t *testing.T) {
 					}
 				}
 				serverTLS, clientTLS := testcert.TLS(t)
-				listener, err := net.Listen("tcp", "127.0.0.1:0")
-				if err != nil {
-					t.Fatal(err)
-				}
-				udp, err := net.ListenPacket("udp", listener.Addr().String())
+				listener, udp, err := transport.ListenSockets("127.0.0.1:0")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -85,7 +81,7 @@ func TestHTTPMirayFixedOutbound(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				server, err := transport.NewServer(listener, udp, transport.ServerOptions{TLS: serverTLS, Auth: verifier, Handler: handler})
+				server, err := transport.NewServer(listener, udp, transport.ServerOptions{TLS: serverTLS, Auth: verifier, Website: mhttp.NotFoundHandler(), Handler: handler})
 				if err != nil {
 					t.Fatal(err)
 				}

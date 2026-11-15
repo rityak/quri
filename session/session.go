@@ -15,7 +15,7 @@ import (
 	"github.com/rityak/quri/transport"
 )
 
-const configurationPath = "/api/session"
+const configurationPath = config.ControlPath
 
 // Request is the only JSON control message; the payload is validated by the host.
 type Request struct {
@@ -26,20 +26,29 @@ type Request struct {
 
 // Session owns one authenticated, configured transport connection.
 type Session struct {
-	conn    *transport.Conn
-	limits  config.Config
-	mu      sync.Mutex
-	packets map[*PacketConn]struct{}
-	closed  bool
+	conn      *transport.Conn
+	limits    config.Config
+	mu        sync.Mutex
+	packets   map[*PacketConn]struct{}
+	closed    bool
+	closeDone chan struct{}
 }
 
 // New authenticates and configures before exposing any TCP or UDP operation.
 // On failure it closes conn, including every transport resource.
 func New(ctx context.Context, conn *transport.Conn, token string, request Request, limits config.Config) (*Session, error) {
+	if conn == nil {
+		return nil, errors.New("missing HTTP connection")
+	}
 	limits = limits.WithDefaults()
 	if err := limits.Validate(); err != nil {
 		return nil, errors.Join(err, conn.Close())
 	}
+	if request.Namespace == "" || len(request.Namespace) > 128 || request.Version == 0 {
+		return nil, errors.Join(errors.New("invalid session configuration"), conn.Close())
+	}
+	ctx, cancel := context.WithTimeout(ctx, limits.OpenTimeout)
+	defer cancel()
 	if err := conn.Authenticate(ctx, token); err != nil {
 		return nil, errors.Join(err, conn.Close())
 	}
@@ -67,7 +76,10 @@ func New(ctx context.Context, conn *transport.Conn, token string, request Reques
 	if err != nil {
 		return nil, errors.Join(err, conn.Close())
 	}
-	s := &Session{conn: conn, limits: limits, packets: make(map[*PacketConn]struct{})}
+	if err := conn.Activate(); err != nil {
+		return nil, errors.Join(err, conn.Close())
+	}
+	s := &Session{conn: conn, limits: limits, packets: make(map[*PacketConn]struct{}), closeDone: make(chan struct{})}
 	context.AfterFunc(conn.Context(), func() { _ = s.Close() }) //nolint:errcheck // Transport termination owns association cancellation. Cancellation cleanup cannot change the completed operation result.
 	return s, nil
 }
@@ -91,6 +103,7 @@ func (s *Session) Close() error {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
+		<-s.closeDone
 		return nil
 	}
 	s.closed = true
@@ -103,5 +116,6 @@ func (s *Session) Close() error {
 	for _, packet := range packets {
 		err = errors.Join(err, packet.Close())
 	}
+	close(s.closeDone)
 	return err
 }

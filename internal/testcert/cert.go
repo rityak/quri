@@ -14,6 +14,8 @@ import (
 	"time"
 )
 
+const testServerName = "localhost"
+
 // TLS returns server and client configurations sharing a temporary test CA.
 func TLS(t testing.TB) (*tls.Config, *tls.Config) {
 	t.Helper()
@@ -21,7 +23,7 @@ func TLS(t testing.TB) (*tls.Config, *tls.Config) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	template := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "localhost"}, DNSNames: []string{"localhost"}, IPAddresses: []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, IsCA: true, BasicConstraintsValid: true}
+	template := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: testServerName}, DNSNames: []string{testServerName}, IPAddresses: []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, IsCA: true, BasicConstraintsValid: true}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, pub, key)
 	if err != nil {
 		t.Fatal(err)
@@ -40,5 +42,5 @@ func TLS(t testing.TB) (*tls.Config, *tls.Config) {
 		t.Fatal(err)
 	}
 	ca.AddCert(parsed)
-	return &tls.Config{Certificates: []tls.Certificate{cert}}, &tls.Config{RootCAs: ca, ServerName: "localhost"}
+	return &tls.Config{Certificates: []tls.Certificate{cert}}, &tls.Config{RootCAs: ca, ServerName: testServerName}
 }

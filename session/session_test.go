@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	mhttp "github.com/metacubex/http"
 	"io"
 	"net"
 	"net/netip"
@@ -72,11 +73,7 @@ func TestHTTPRelayTCPAndUDP(t *testing.T) {
 				<-udpDone
 			}()
 			serverTLS, clientTLS := testcert.TLS(t)
-			listener, err := net.Listen("tcp", "127.0.0.1:0")
-			if err != nil {
-				t.Fatal(err)
-			}
-			udp, err := net.ListenPacket("udp", listener.Addr().String())
+			listener, udp, err := transport.ListenSockets("127.0.0.1:0")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -96,7 +93,7 @@ func TestHTTPRelayTCPAndUDP(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			server, err := transport.NewServer(listener, udp, transport.ServerOptions{TLS: serverTLS, Auth: verifier, Handler: handler})
+			server, err := transport.NewServer(listener, udp, transport.ServerOptions{TLS: serverTLS, Auth: verifier, Website: mhttp.NotFoundHandler(), Handler: handler})
 			if err != nil {
 				t.Fatal(err)
 			}

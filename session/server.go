@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/metacubex/http"
 	"github.com/rityak/quri/config"
@@ -23,10 +24,12 @@ import (
 type Factory func(context.Context, string, Request) (route.Route, error)
 
 type serverSession struct {
-	ready  chan struct{}
-	route  route.Route
-	err    error
-	active atomic.Int64
+	ready     chan struct{}
+	route     route.Route
+	err       error
+	active    atomic.Int64
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // Server is an HTTP handler. It never loads global miray rules or configuration.
@@ -36,6 +39,7 @@ type Server struct {
 	logger   *slog.Logger
 	mu       sync.Mutex
 	sessions map[*transport.Peer]*serverSession
+	closing  bool
 }
 
 // NewServer bounds configuration work and snapshots the shared resource limits.
@@ -124,9 +128,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) configure(w http.ResponseWriter, r *http.Request, peer *transport.Peer) {
+	if setter, ok := w.(interface{ SetReadDeadline(time.Time) error }); ok {
+		if err := setter.SetReadDeadline(time.Now().Add(s.limits.OpenTimeout)); err != nil {
+			http.Error(w, "request unavailable", http.StatusInternalServerError)
+			return
+		}
+	}
 	var request Request
 	data, err := io.ReadAll(io.LimitReader(r.Body, int64(s.limits.MaxControl)+1))
-	if err != nil || len(data) > s.limits.MaxControl {
+	if err != nil || len(data) > s.limits.MaxControl || !utf8.Valid(data) {
 		http.Error(w, "configuration too large", http.StatusRequestEntityTooLarge)
 		return
 	}
@@ -138,7 +148,7 @@ func (s *Server) configure(w http.ResponseWriter, r *http.Request, peer *transpo
 	}
 	state := &serverSession{ready: make(chan struct{})}
 	s.mu.Lock()
-	if _, exists := s.sessions[peer]; exists || len(s.sessions) >= s.limits.MaxConnections {
+	if _, exists := s.sessions[peer]; exists || s.closing || len(s.sessions) >= s.limits.MaxConnections {
 		s.mu.Unlock()
 		http.Error(w, "session already configured or busy", http.StatusConflict)
 		return
@@ -151,22 +161,50 @@ func (s *Server) configure(w http.ResponseWriter, r *http.Request, peer *transpo
 	if state.err == nil && state.route == nil {
 		state.err = errors.New("factory returned no route")
 	}
+	if state.err != nil && state.route != nil {
+		state.err = errors.Join(state.err, state.route.Close())
+		state.route = nil
+	}
 	close(state.ready)
 	context.AfterFunc(peer.Context(), func() {
+		if err := state.close(); err != nil {
+			s.logger.Debug("close outbound failed", "error", err)
+		}
 		s.mu.Lock()
 		delete(s.sessions, peer)
 		s.mu.Unlock()
-		if state.route != nil {
-			if err := state.route.Close(); err != nil {
-				s.logger.Debug("close outbound failed", "error", err)
-			}
-		}
 	})
 	if state.err != nil {
 		http.Error(w, "configuration rejected", http.StatusForbidden)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *serverSession) close() error {
+	<-s.ready
+	s.closeOnce.Do(func() {
+		if s.route != nil {
+			s.closeErr = s.route.Close()
+		}
+	})
+	return s.closeErr
+}
+
+// Close releases all configured outbounds after the HTTP transport has stopped.
+func (s *Server) Close() error {
+	s.mu.Lock()
+	s.closing = true
+	states := make([]*serverSession, 0, len(s.sessions))
+	for _, state := range s.sessions {
+		states = append(states, state)
+	}
+	s.mu.Unlock()
+	var err error
+	for _, state := range states {
+		err = errors.Join(err, state.close())
+	}
+	return err
 }
 
 func (s *Server) serveUDP(w http.ResponseWriter, r *http.Request, outbound route.Route) {

@@ -18,8 +18,6 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/rityak/http v0.1.9-0.20261115170447-fb1f316d86fc h1:t+KhQ15y+ik85BvMR8/MLrVhGh4jDa8pOR89qqNABfE=
 github.com/rityak/http v0.1.9-0.20261115170447-fb1f316d86fc/go.mod h1:Nxx0zZAo2AhRfanyL+fmmK6ACMtVsfpwIl1aFAik2Eg=
-github.com/rityak/quic-go v0.61.1-0.20261115102657-a6ba8bb51c89 h1:VdewrPJG3BOmPFg/CwpT9Yio58GnhU8S7wqXtuxfUOs=
-github.com/rityak/quic-go v0.61.1-0.20261115102657-a6ba8bb51c89/go.mod h1:KTmibo7vZo0gCxdFWrPEQ/u/RGt92mJkrXDE2Qg2/AU=
 github.com/rityak/quic-go v0.61.1-0.20261115171335-8f0b372b74bf h1:8cUgw0AJ8gBf14pWA66J+/2bkKqHUhXRzzRlyT2NDBQ=
 github.com/rityak/quic-go v0.61.1-0.20261115171335-8f0b372b74bf/go.mod h1:KTmibo7vZo0gCxdFWrPEQ/u/RGt92mJkrXDE2Qg2/AU=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=

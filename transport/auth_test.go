@@ -3,7 +3,6 @@ package transport
 import (
 	"context"
 	"io"
-	"net"
 	"strings"
 	"testing"
 	"time"
@@ -20,11 +19,7 @@ func TestHTTPProofCannotAuthorizeAnotherConnection(t *testing.T) {
 	for _, protocol := range []string{"h3", "h2"} {
 		t.Run(protocol, func(t *testing.T) {
 			serverTLS, clientTLS := testcert.TLS(t)
-			listener, err := net.Listen("tcp", "127.0.0.1:0")
-			if err != nil {
-				t.Fatal(err)
-			}
-			udp, err := net.ListenPacket("udp", listener.Addr().String())
+			listener, udp, err := ListenSockets("127.0.0.1:0")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -33,7 +28,7 @@ func TestHTTPProofCannotAuthorizeAnotherConnection(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			server, err := NewServer(listener, udp, ServerOptions{TLS: serverTLS, Auth: verifier, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })})
+			server, err := NewServer(listener, udp, ServerOptions{TLS: serverTLS, Auth: verifier, Website: testWebsite(), Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })})
 			if err != nil {
 				t.Fatal(err)
 			}

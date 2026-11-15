@@ -16,6 +16,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"unicode/utf8"
 
 	"github.com/metacubex/tls"
 	"github.com/rityak/quri/auth"
@@ -26,6 +27,7 @@ import (
 	"github.com/rityak/quri/session"
 	"github.com/rityak/quri/socks5"
 	"github.com/rityak/quri/transport"
+	"golang.org/x/sync/errgroup"
 )
 
 type configFile struct {
@@ -40,6 +42,7 @@ type configFile struct {
 	Allow       []string      `json:"allow"`
 	Profile     string        `json:"profile"`
 	Upstream    string        `json:"upstream"`
+	Website     string        `json:"website"`
 	Ports       []uint16      `json:"ports"`
 	Transports  []string      `json:"transports"`
 	Domain      string        `json:"domain"`
@@ -75,7 +78,7 @@ func run() error {
 		if err := errors.Join(err, file.Close()); err != nil {
 			return err
 		}
-		if len(raw) > config.DefaultMaxControl {
+		if len(raw) > config.DefaultMaxControl || !utf8.Valid(raw) {
 			return errors.New("configuration too large")
 		}
 		decoder := json.NewDecoder(bytes.NewReader(raw))
@@ -107,19 +110,29 @@ func run() error {
 
 func serve(ctx context.Context, cfg configFile, relative func(string) string) error {
 	var tc *tls.Config
+	var files *certificates.Files
 	if cfg.Domain != "" {
+		if cfg.Certificate != "" || cfg.Key != "" {
+			return errors.New("choose ACME or external certificate files")
+		}
 		var err error
 		tc, err = certificates.ACME(cfg.Domain, relative(cfg.ACMECache), cfg.ACMEEmail)
 		if err != nil {
 			return err
 		}
 	} else {
-		cert, err := tls.LoadX509KeyPair(relative(cfg.Certificate), relative(cfg.Key))
+		var err error
+		files, err = certificates.LoadFiles(relative(cfg.Certificate), relative(cfg.Key))
 		if err != nil {
 			return err
 		}
-		tc = &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS13}
+		tc = &tls.Config{GetCertificate: files.GetCertificate, MinVersion: tls.VersionTLS13}
 	}
+	website, err := transport.NewWebsiteProxy(cfg.Website, cfg.Limits)
+	if err != nil {
+		return err
+	}
+	defer website.Close() //nolint:errcheck // Close only releases idle backend connections after serving stops.
 	verifier, err := auth.New(map[string]string{"default": cfg.Token})
 	if err != nil {
 		return err
@@ -135,13 +148,9 @@ func serve(ctx context.Context, cfg configFile, relative func(string) string) er
 	if len(policy.Allowed) == 0 {
 		return errors.New("server requires an explicit allow CIDR list")
 	}
-	tcp, err := net.Listen("tcp", cfg.Listen)
+	tcp, udp, err := transport.ListenSockets(cfg.Listen)
 	if err != nil {
 		return err
-	}
-	udp, err := net.ListenPacket("udp", tcp.Addr().String())
-	if err != nil {
-		return errors.Join(err, tcp.Close())
 	}
 	_, service, err := net.SplitHostPort(tcp.Addr().String())
 	if err != nil {
@@ -178,12 +187,19 @@ func serve(ctx context.Context, cfg configFile, relative func(string) string) er
 	if err != nil {
 		return errors.Join(err, tcp.Close(), udp.Close())
 	}
-	server, err := transport.NewServer(tcp, udp, transport.ServerOptions{TLS: tc, Auth: verifier, Handler: handler, Limits: cfg.Limits})
+	server, err := transport.NewServer(tcp, udp, transport.ServerOptions{TLS: tc, Auth: verifier, Handler: handler, Website: website, Limits: cfg.Limits})
 	if err != nil {
 		return errors.Join(err, tcp.Close(), udp.Close())
 	}
 	fmt.Fprintf(os.Stderr, "quri server listening on %s\n", tcp.Addr())
-	return server.Serve(ctx)
+	ownedCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var workers errgroup.Group
+	workers.Go(func() error { defer cancel(); return server.Serve(ownedCtx) })
+	if files != nil {
+		workers.Go(func() error { return files.Run(ownedCtx, slog.Default()) })
+	}
+	return errors.Join(workers.Wait(), handler.Close())
 }
 
 func serveClient(ctx context.Context, cfg configFile, relative func(string) string) error {

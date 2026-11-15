@@ -31,7 +31,7 @@ func ValidateAddress(address string) error {
 		return ErrProtocol
 	}
 	host, port, err := net.SplitHostPort(address)
-	if err != nil || host == "" || strings.ContainsAny(host, "\x00\r\n% /?#") {
+	if err != nil || host == "" || strings.ContainsAny(host, "\x00\r\n% /?#@\\") {
 		return ErrProtocol
 	}
 	n, err := strconv.Atoi(port)
