@@ -8,6 +8,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/rityak/quri/config"
 )
 
 // DirectPolicy is an explicit destination allowlist. DNS results are checked
@@ -36,8 +38,18 @@ func NewDirectRoute(policy DirectPolicy) (*DirectRoute, error) {
 // Resolve authorizes a destination and returns its checked numeric endpoint.
 // Proxy hosts must use that endpoint without resolving the name again.
 func (r *DirectRoute) Resolve(ctx context.Context, address string) (netip.AddrPort, error) {
+	if err := ctx.Err(); err != nil {
+		return netip.AddrPort{}, err
+	}
 	if err := ValidateAddress(address); err != nil {
 		return netip.AddrPort{}, err
+	}
+	if endpoint, err := netip.ParseAddrPort(address); err == nil {
+		endpoint = netip.AddrPortFrom(endpoint.Addr().Unmap(), endpoint.Port())
+		if !r.allows(endpoint) {
+			return netip.AddrPort{}, ErrDenied
+		}
+		return endpoint, nil
 	}
 	host, service, err := net.SplitHostPort(address)
 	if err != nil {
@@ -53,24 +65,25 @@ func (r *DirectRoute) Resolve(ctx context.Context, address string) (netip.AddrPo
 	}
 	for _, ip := range ips {
 		endpoint := netip.AddrPortFrom(ip.Unmap(), uint16(port))
-		allowed := false
-		for _, prefix := range r.policy.Allowed {
-			if prefix.Contains(endpoint.Addr()) {
-				allowed = true
-				break
-			}
-		}
-		for _, denied := range r.policy.Denied {
-			if denied == endpoint {
-				allowed = false
-				break
-			}
-		}
-		if allowed {
+		if r.allows(endpoint) {
 			return endpoint, nil
 		}
 	}
 	return netip.AddrPort{}, ErrDenied
+}
+
+func (r *DirectRoute) allows(endpoint netip.AddrPort) bool {
+	for _, denied := range r.policy.Denied {
+		if denied == endpoint {
+			return false
+		}
+	}
+	for _, prefix := range r.policy.Allowed {
+		if prefix.Contains(endpoint.Addr()) {
+			return true
+		}
+	}
+	return false
 }
 
 // DialContext resolves and authorizes the destination before opening a socket.
@@ -86,15 +99,8 @@ func (r *DirectRoute) DialContext(ctx context.Context, address string) (net.Conn
 			return ErrDenied
 		}
 		endpoint = netip.AddrPortFrom(endpoint.Addr().Unmap(), endpoint.Port())
-		for _, denied := range r.policy.Denied {
-			if denied == endpoint {
-				return ErrDenied
-			}
-		}
-		for _, prefix := range r.policy.Allowed {
-			if prefix.Contains(endpoint.Addr()) {
-				return nil
-			}
+		if r.allows(endpoint) {
+			return nil
 		}
 		return ErrDenied
 	}}
@@ -102,7 +108,7 @@ func (r *DirectRoute) DialContext(ctx context.Context, address string) (net.Conn
 }
 
 // ListenPacket creates a UDP socket that checks every destination and accepts
-// replies only from endpoints successfully written through this association.
+// replies only from authorized destinations addressed by this association.
 func (r *DirectRoute) ListenPacket(ctx context.Context) (net.PacketConn, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -111,7 +117,7 @@ func (r *DirectRoute) ListenPacket(ctx context.Context) (net.PacketConn, error) 
 	if err != nil {
 		return nil, err
 	}
-	return &directPacket{PacketConn: pc, route: r, peers: make(map[string]struct{})}, nil
+	return &directPacket{PacketConn: pc, socket: pc, route: r, peers: make(map[netip.AddrPort]*directPeer)}, nil
 }
 
 // Close releases route configuration; flows own their individual sockets.
@@ -119,46 +125,75 @@ func (r *DirectRoute) Close() error { return nil }
 
 type directPacket struct {
 	net.PacketConn
+	socket   *net.UDPConn
 	route    *DirectRoute
 	mu       sync.Mutex
-	peers    map[string]struct{}
+	peers    map[netip.AddrPort]*directPeer
 	deadline time.Time
 }
 
+type directPeer struct{ endpoint netip.AddrPort }
+
+func (p *directPeer) Network() string { return "udp" }
+func (p *directPeer) String() string  { return p.endpoint.String() }
+
 func (p *directPacket) WriteTo(b []byte, addr net.Addr) (int, error) {
-	p.mu.Lock()
-	deadline := p.deadline
-	p.mu.Unlock()
-	if deadline.IsZero() {
-		deadline = time.Now().Add(5 * time.Second)
+	if addr == nil {
+		return 0, ErrProtocol
 	}
-	ctx, cancel := context.WithDeadline(context.Background(), deadline)
-	defer cancel()
-	endpoint, err := p.route.Resolve(ctx, addr.String())
-	if err != nil {
-		return 0, err
+	var endpoint netip.AddrPort
+	switch a := addr.(type) {
+	case *net.UDPAddr:
+		endpoint = a.AddrPort()
+	case *directPeer:
+		endpoint = a.endpoint
+	default:
+		endpoint, _ = netip.ParseAddrPort(addr.String()) //nolint:errcheck // Non-numeric destinations take the bounded DNS path below.
+	}
+	if endpoint.IsValid() {
+		endpoint = netip.AddrPortFrom(endpoint.Addr().Unmap(), endpoint.Port())
+		if endpoint.Port() == 0 || !p.route.allows(endpoint) {
+			return 0, ErrDenied
+		}
+	} else {
+		p.mu.Lock()
+		deadline := p.deadline
+		p.mu.Unlock()
+		if deadline.IsZero() {
+			deadline = time.Now().Add(config.DefaultOpenTimeout)
+		}
+		ctx, cancel := context.WithDeadline(context.Background(), deadline)
+		defer cancel()
+		var err error
+		endpoint, err = p.route.Resolve(ctx, addr.String())
+		if err != nil {
+			return 0, err
+		}
 	}
 	p.mu.Lock()
-	_, exists := p.peers[endpoint.String()]
+	_, exists := p.peers[endpoint]
 	if !exists && len(p.peers) >= 256 {
 		p.mu.Unlock()
 		return 0, ErrLimit
 	}
-	p.peers[endpoint.String()] = struct{}{}
+	if !exists {
+		p.peers[endpoint] = &directPeer{endpoint: endpoint}
+	}
 	p.mu.Unlock()
-	return p.PacketConn.WriteTo(b, net.UDPAddrFromAddrPort(endpoint))
+	return p.socket.WriteToUDPAddrPort(b, endpoint)
 }
 func (p *directPacket) ReadFrom(b []byte) (int, net.Addr, error) {
 	for {
-		n, addr, err := p.PacketConn.ReadFrom(b)
+		n, addr, err := p.socket.ReadFromUDPAddrPort(b)
 		if err != nil {
-			return n, addr, err
+			return n, nil, err
 		}
+		addr = netip.AddrPortFrom(addr.Addr().Unmap(), addr.Port())
 		p.mu.Lock()
-		_, allowed := p.peers[addr.String()]
+		peer, allowed := p.peers[addr]
 		p.mu.Unlock()
 		if allowed {
-			return n, addr, nil
+			return n, peer, nil
 		}
 	}
 }

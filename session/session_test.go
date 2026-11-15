@@ -20,6 +20,8 @@ import (
 	"go.uber.org/goleak"
 )
 
+const testNamespace = "direct"
+
 func TestMain(m *testing.M) { goleak.VerifyTestMain(m) }
 
 func TestHTTPRelayTCPAndUDP(t *testing.T) {
@@ -85,7 +87,7 @@ func TestHTTPRelayTCPAndUDP(t *testing.T) {
 			var configurations atomic.Int64
 			handler, err := NewServer(func(ctx context.Context, principal string, request Request) (route.Route, error) {
 				configurations.Add(1)
-				if principal != "user" || request.Namespace != "direct" || request.Version != 1 {
+				if principal != "user" || request.Namespace != testNamespace || request.Version != 1 {
 					return nil, route.ErrDenied
 				}
 				return route.NewDirectRoute(route.DirectPolicy{Allowed: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}})
@@ -110,7 +112,7 @@ func TestHTTPRelayTCPAndUDP(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			session, err := New(ctx, connection, token, Request{Namespace: "direct", Version: 1}, config.Config{})
+			session, err := New(ctx, connection, token, Request{Namespace: testNamespace, Version: 1}, config.Config{})
 			if err != nil {
 				t.Fatal(err)
 			}
