@@ -13,6 +13,7 @@
 - Corrected default NewReno loss reduction and exposed HTTP/3 DATAGRAM deadlines
   through published fork pins.
 
-The legacy root SDK and CLI still use quri/1 until their callers are migrated.
+The CLI now uses h3/h2 with the same JSON configuration file format and supports
+quri:// links. The legacy root SDK still uses quri/1 until its callers migrate.
 M0–M4 acceptance is incomplete: full UDP-path allocation measurements, complete
-lint migration, miray route wiring, ACME/deployment UX and M4 field tests remain.
+lint migration, core configuration wiring, deployment UX and M4 field tests remain.

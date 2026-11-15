@@ -152,7 +152,7 @@ func (s *Server) serveH2(ctx context.Context) error {
 			stop := context.AfterFunc(connCtx, func() { _ = raw.Close() }) //nolint:errcheck // Cancellation cleanup cannot change the completed operation result.
 			defer stop()
 			tc := s.options.TLS.Clone()
-			tc.NextProtos = []string{"h2"}
+			tc.NextProtos = append([]string{"h2"}, tc.NextProtos...)
 			conn := tls.Server(raw, tc)
 			handshakeCtx, stopHandshake := context.WithTimeout(connCtx, s.options.Limits.HandshakeTimeout)
 			err := conn.HandshakeContext(handshakeCtx)

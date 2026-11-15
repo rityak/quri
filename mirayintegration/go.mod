@@ -148,7 +148,7 @@ replace github.com/metacubex/smux => github.com/rityak/smux v0.0.0-2026101509503
 
 replace github.com/metacubex/utls => github.com/rityak/utls v0.0.0-20261015104218-792958f984ea
 
-replace github.com/metacubex/quic-go => github.com/rityak/quic-go v0.61.1-0.20261115102657-a6ba8bb51c89
+replace github.com/metacubex/quic-go => github.com/rityak/quic-go v0.61.1-0.20261115171335-8f0b372b74bf
 
 replace github.com/metacubex/sing-quic => github.com/rityak/sing-quic v0.0.0-20261115102827-bd034150c9e2
 
@@ -157,3 +157,5 @@ replace github.com/metacubex/sing-shadowsocks => github.com/rityak/sing-shadowso
 replace github.com/metacubex/sing-shadowsocks2 => github.com/rityak/sing-shadowsocks2 v0.2.9-0.20261017012153-da4a7a72dbf5
 
 replace github.com/metacubex/sing => github.com/rityak/sing v0.5.9-0.20261115102824-a08acaf1b035
+
+replace github.com/metacubex/http => github.com/rityak/http v0.1.9-0.20261115170447-fb1f316d86fc

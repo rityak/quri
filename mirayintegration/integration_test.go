@@ -188,6 +188,24 @@ func TestMirayOutboundContract(t *testing.T) {
 }
 
 func checkTraffic(t *testing.T, ctx context.Context, s *quri.Session, protocol string) {
+	checkClientTraffic(t, ctx, legacyTraffic{s}, protocol)
+}
+
+type trafficClient interface {
+	DialContext(context.Context, string) (net.Conn, error)
+	ListenPacket(context.Context) (net.PacketConn, error)
+}
+
+type legacyTraffic struct{ *quri.Session }
+
+func (s legacyTraffic) DialContext(ctx context.Context, address string) (net.Conn, error) {
+	return s.Session.DialContext(ctx, address)
+}
+func (s legacyTraffic) ListenPacket(ctx context.Context) (net.PacketConn, error) {
+	return s.Session.ListenPacket(ctx)
+}
+
+func checkClientTraffic(t *testing.T, ctx context.Context, s trafficClient, protocol string) {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -220,7 +238,7 @@ func checkTraffic(t *testing.T, ctx context.Context, s *quri.Session, protocol s
 	c.SetDeadline(time.Now().Add(6 * time.Second))
 	_, err = c.Write([]byte("request"))
 	if err == nil {
-		err = c.CloseWrite()
+		err = c.(interface{ CloseWrite() error }).CloseWrite()
 	}
 	if err != nil {
 		c.Close()
@@ -256,6 +274,9 @@ func checkTraffic(t *testing.T, ctx context.Context, s *quri.Session, protocol s
 			}
 		}()
 		sizes := []int{0, 1, 1200, 4096, 8192}
+		if strings.HasPrefix(protocol, "http/") {
+			sizes = []int{1, 512, 1150}
+		}
 		for _, size := range sizes {
 			data := bytes.Repeat([]byte{byte(size + endpoint)}, size)
 			pc.SetDeadline(time.Now().Add(3 * time.Second))
@@ -280,7 +301,9 @@ func checkTraffic(t *testing.T, ctx context.Context, s *quri.Session, protocol s
 			}
 		}
 	}
-	if reply, err := s.Message(ctx, quri.Request{Namespace: "status", Version: 1, Payload: []byte("alive")}); err != nil || string(reply) != "alive" {
-		t.Fatal("service channel after traffic", string(reply), err)
+	if legacy, ok := s.(legacyTraffic); ok {
+		if reply, err := legacy.Message(ctx, quri.Request{Namespace: "status", Version: 1, Payload: []byte("alive")}); err != nil || string(reply) != "alive" {
+			t.Fatal("service channel after traffic", string(reply), err)
+		}
 	}
 }

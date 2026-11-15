@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -124,7 +125,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) configure(w http.ResponseWriter, r *http.Request, peer *transport.Peer) {
 	var request Request
-	decoder := json.NewDecoder(io.LimitReader(r.Body, int64(s.limits.MaxControl)+1))
+	data, err := io.ReadAll(io.LimitReader(r.Body, int64(s.limits.MaxControl)+1))
+	if err != nil || len(data) > s.limits.MaxControl {
+		http.Error(w, "configuration too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil || request.Namespace == "" || len(request.Namespace) > 128 || request.Version == 0 || decoder.Decode(new(any)) != io.EOF {
 		http.Error(w, "invalid configuration", http.StatusBadRequest)
