@@ -2,17 +2,26 @@ package mirayintegration
 
 import (
 	"context"
+	"crypto/ecdh"
+	"crypto/rand"
+	stdtls "crypto/tls"
+	"encoding/base64"
+	"encoding/pem"
 	mhttp "github.com/metacubex/http"
+	"net"
+	stdhttp "net/http"
+	"net/http/httptest"
 	"net/netip"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/metacubex/mihomo/adapter"
 	"github.com/metacubex/mihomo/adapter/outbound"
 	"github.com/metacubex/mihomo/component/ca"
 	"github.com/metacubex/mihomo/listener/inbound"
 	"github.com/rityak/quri/auth"
-	"github.com/rityak/quri/client"
 	"github.com/rityak/quri/config"
 	"github.com/rityak/quri/internal/testcert"
 	"github.com/rityak/quri/route"
@@ -27,12 +36,38 @@ func TestHTTPMirayFixedOutbound(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, httpProtocol := range []string{"h3", "h2"} {
-		for _, protocol := range []string{"vless", "hysteria2"} {
+		for _, protocol := range []string{"vless", "vless-reality", "hysteria2"} {
 			t.Run(httpProtocol+"/"+protocol, func(t *testing.T) {
 				base := inbound.BaseOption{NameStr: "reference", Listen: "127.0.0.1", Port: "0"}
 				var factory session.Factory
 				events := make(chan string, 128)
-				if protocol == "vless" {
+				if protocol == "vless-reality" {
+					pair, err := stdtls.X509KeyPair([]byte(certificate), []byte(key))
+					if err != nil {
+						t.Fatal(err)
+					}
+					origin := httptest.NewUnstartedServer(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) { w.WriteHeader(stdhttp.StatusOK) }))
+					origin.EnableHTTP2 = true
+					origin.TLS = &stdtls.Config{Certificates: []stdtls.Certificate{pair}, MinVersion: stdtls.VersionTLS13}
+					origin.StartTLS()
+					defer origin.Close()
+					private, err := ecdh.X25519().GenerateKey(rand.Reader)
+					if err != nil {
+						t.Fatal(err)
+					}
+					in, err := inbound.NewVless(&inbound.VlessOption{BaseOption: base, Users: []inbound.VlessUser{{UUID: uuid}}, RealityConfig: inbound.RealityConfig{Dest: strings.TrimPrefix(origin.URL, "https://"), PrivateKey: base64.RawURLEncoding.EncodeToString(private.Bytes()), ServerNames: []string{"localhost"}, ShortID: []string{"01"}}})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := in.Listen(directTunnel{events: events}); err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() { in.Close() })
+					link := "vless://" + uuid + "@" + in.Address() + "?security=reality&type=tcp&sni=localhost&fp=chrome&sid=01&pbk=" + base64.RawURLEncoding.EncodeToString(private.PublicKey().Bytes())
+					factory = func(ctx context.Context, principal string, request session.Request) (route.Route, error) {
+						return NewOutbound(link)
+					}
+				} else if protocol == "vless" {
 					in, err := inbound.NewVless(&inbound.VlessOption{BaseOption: base, Users: []inbound.VlessUser{{UUID: uuid}}, Certificate: certificate, PrivateKey: key})
 					if err != nil {
 						t.Fatal(err)
@@ -94,7 +129,19 @@ func TestHTTPMirayFixedOutbound(t *testing.T) {
 						t.Error(err)
 					}
 				}()
-				manager, err := client.Dial(ctx, client.Config{Address: listener.Addr().String(), Token: token, Transports: []string{httpProtocol}, Transport: transport.ClientOptions{TLS: clientTLS}, Configuration: session.Request{Namespace: "miray.outbound", Version: 1}})
+				host, service, err := net.SplitHostPort(listener.Addr().String())
+				if err != nil {
+					t.Fatal(err)
+				}
+				port, err := strconv.Atoi(service)
+				if err != nil {
+					t.Fatal(err)
+				}
+				proxy, err := adapter.ParseProxy(map[string]any{"type": "quri", "name": "relay-client", "server": host, "port": port, "token": token, "sni": clientTLS.ServerName, "transports": []string{httpProtocol}, "ca": string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: serverTLS.Certificates[0].Certificate[0]}))})
+				if err != nil {
+					t.Fatal(err)
+				}
+				manager, err := NewAdapter(proxy)
 				if err != nil {
 					t.Fatal(err)
 				}

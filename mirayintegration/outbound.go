@@ -1,3 +1,4 @@
+// Package mirayintegration binds fixed miray outbounds to independent quri sessions.
 package mirayintegration
 
 import (

@@ -23,6 +23,21 @@ import (
 
 func TestMain(m *testing.M) { goleak.VerifyTestMain(m) }
 
+func TestMappedIPv4CandidatesUseIPv4Endpoints(t *testing.T) {
+	m := &Manager{cfg: Config{Address: "relay.example:443", Transports: []string{"h3", "h2"}, Resolve: func(context.Context, string) ([]netip.Addr, error) {
+		return []netip.Addr{netip.MustParseAddr("::ffff:127.0.0.1")}, nil
+	}}}
+	candidates, err := m.candidates(context.Background())
+	if err != nil || len(candidates) != 2 {
+		t.Fatalf("mapped IPv4 candidates: %v %v", candidates, err)
+	}
+	for _, candidate := range candidates {
+		if candidate.address != "127.0.0.1:443" {
+			t.Fatalf("mapped IPv4 was not normalized: %s", candidate.address)
+		}
+	}
+}
+
 type blockedUDP struct {
 	net.PacketConn
 	closed *atomic.Int64

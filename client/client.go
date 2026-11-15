@@ -135,6 +135,7 @@ func (m *Manager) candidates(ctx context.Context) ([]candidate, error) {
 		return nil, errors.New("relay has no addresses")
 	}
 	var v4, v6 []netip.Addr
+	preferV4 := m.cfg.Resolve != nil && len(ips) > 0 && ips[0].Unmap().Is4()
 	for _, ip := range ips {
 		ip = ip.Unmap()
 		if ip.IsValid() {
@@ -147,11 +148,15 @@ func (m *Manager) candidates(ctx context.Context) ([]candidate, error) {
 	}
 	ips = nil
 	for len(v4)+len(v6) > 0 {
+		if preferV4 && len(v4) > 0 {
+			ips = append(ips, v4[0])
+			v4 = v4[1:]
+		}
 		if len(v6) > 0 {
 			ips = append(ips, v6[0])
 			v6 = v6[1:]
 		}
-		if len(v4) > 0 {
+		if !preferV4 && len(v4) > 0 {
 			ips = append(ips, v4[0])
 			v4 = v4[1:]
 		}
