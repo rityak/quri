@@ -52,7 +52,7 @@ jobs:
         if: matrix.module == 'mirayintegration'
         with:
           repository: rityak/miray
-          ref: e9d2a1f6c3e7b7cb5bdde12b18b39044270e794a
+          ref: 9451b8cb0ad5ca88de14b5e3361e736204ccac7e
           path: miray
       - uses: actions/setup-go@v5
         with:

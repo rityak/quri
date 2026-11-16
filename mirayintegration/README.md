@@ -5,12 +5,12 @@
 один session-local outbound-адаптер, без процесса ядра и глобального ApplyConfig.
 
 Нужен sibling checkout ядра. Зафиксированный CI commit:
-`e9d2a1f6c3e7b7cb5bdde12b18b39044270e794a`.
+`9451b8cb0ad5ca88de14b5e3361e736204ccac7e`.
 Из корня quri:
 
 ```sh
 git clone https://github.com/rityak/miray.git ../miray
-git -C ../miray checkout e9d2a1f6c3e7b7cb5bdde12b18b39044270e794a
+git -C ../miray checkout 9451b8cb0ad5ca88de14b5e3361e736204ccac7e
 cd mirayintegration
 go build -trimpath -o quri-relay ./cmd/quri-relay
 go test -race ./... -count=1 -timeout=3m
@@ -46,4 +46,5 @@ X25519 keys. Второе плечо проверяется против listene
 HTTP/3 peer для первого плеча находится в соседнем модуле `interop`.
 
 Linux packaging и пробная установка выполняются CI через `deploy/build.py`.
-Реальный systemd service, live ACME и полевые мобильные сети не проверялись.
+Тестовый systemd service в Москве и выдача/renewal dry-run внешнего ACME
+сертификата проверены. Полевые мобильные сети и длительная нагрузка не проверялись.
