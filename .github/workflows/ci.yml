@@ -22,10 +22,11 @@ jobs:
       - run: go test ./transport -run '^$' -bench BenchmarkDatagramCodec -benchmem
       - run: go test ./route -run '^$' -bench BenchmarkDirectUDPRoundTrip -benchmem
       - name: Fuzz binary parsers
+        # Count-based budgets avoid the duration-expiry race in golang/go#75804.
         run: |
-          go test ./transport -run '^$' -fuzz '^FuzzDatagram$' -fuzztime=5s
-          go test ./transport -run '^$' -fuzz '^FuzzCapsule$' -fuzztime=5s
-          go test ./client -run '^$' -fuzz '^FuzzProfileLink$' -fuzztime=5s
+          go test ./transport -run '^$' -fuzz '^FuzzDatagram$' -fuzztime=100000x
+          go test ./transport -run '^$' -fuzz '^FuzzCapsule$' -fuzztime=100000x
+          go test ./client -run '^$' -fuzz '^FuzzProfileLink$' -fuzztime=100000x
   lint:
     runs-on: ubuntu-latest
     steps:
