@@ -38,6 +38,7 @@ services. External certificate files reload without dropping active sessions.
 
 Still incomplete: full UDP-path zero-allocation targets, remote port rotation,
 startup padding, a measured Chrome transport-parameter profile and BBR evaluation.
-Live ACME issuance, service operation on a real host, and 24-hour tests on wired
-and two mobile networks have not been performed. CI tests the staged installer;
-it does not start a production service or publish releases.
+External certbot issuance/renewal dry-run and an isolated systemd deployment
+have been tested in Moscow. The built-in ACME TLS-ALPN issuer and 24-hour tests
+on wired and two mobile networks remain unverified. CI tests staged installation;
+it does not publish releases.
