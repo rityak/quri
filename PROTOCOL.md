@@ -61,3 +61,16 @@ connections, UDP targets and queues are bounded by `config.Config`. Initial
 QUIC packet size is 1200. Reconnection races endpoint/transport candidates,
 closes losers, applies backoff with jitter and recreates UDP associations.
 Previously established TCP streams are never replayed or resumed.
+
+Configured clients send authenticated HEAD health checks at independently
+randomized intervals between 10 and 25 seconds. Only HTTP 204 is success.
+The QUIC stack's fixed-period keepalive is disabled. Connection idle timeout
+defaults to 60 seconds and is separate from individual UDP tunnel idle limits.
+
+Local-address migration uses a fresh socket, PATH_CHALLENGE/PATH_RESPONSE,
+reserved destination connection IDs, and an authenticated round trip before
+retiring the previous socket. TLS, configuration, TCP streams and UDP tunnels
+belong to the same connection throughout. An unvalidated candidate is discarded
+without replacing the working path. If verification after switching fails,
+the session closes and the manager reconnects. No application stream resumes
+across reconnection. This mechanism does not rotate the remote server port.

@@ -23,6 +23,8 @@ Go не наследует замены зависимого модуля.
 quri -config server.json
 quri -config client.json
 quri -link 'quri://TOKEN@relay.example:443?sni=relay.example&transports=h3,h2'
+quri -config client.json -export-link
+quri -config client.json -qr private-profile.png
 ```
 
 Сервер слушает TCP и UDP на одном адресе. `website` — обязательный URL
@@ -42,6 +44,26 @@ TLS завершается в quri для проверки TLS-exporter HMAC. О
 принимает следующий `quri://` узел. Модуль `mirayintegration` предоставляет
 session-local адаптеры VLESS/HY2; глобальные правила ядра не загружаются.
 
+`quri-relay` с адаптерами miray собирается из `mirayintegration/`:
+
+```sh
+cd mirayintegration && go build -trimpath -o quri-relay ./cmd/quri-relay
+```
+
+Linux-архив с обоими бинарниками и установщиком:
+
+```sh
+python3 deploy/build.py --arch amd64
+tar -xzf dist/quri-relay-linux-amd64.tar.gz -C /path/to/package
+sudo /path/to/package/install.sh --config /absolute/path/server.json
+```
+
+Пример серверного конфига — `deploy/server.example.json`. Сначала задайте
+собственный домен, секреты, URL внешнего сайта и outbound/allowlist.
+Установщик проверяет конфиг, создаёт отдельного системного пользователя и unit;
+существующий отличающийся конфиг не перезаписывается. Для предварительной
+проверки доступны `-check`, `-check-service` и `--no-start --prefix /staging`.
+
 ## Ограничения
 
 Один UDP-пакет передаётся одной DATAGRAM без фрагментации. По умолчанию
@@ -49,9 +71,22 @@ payload ограничен 1150 байт; большие пакеты отбра
 надёжными упорядоченными capsules и разделяет TCP head-of-line blocking.
 Реконнект восстанавливает UDP-ассоциации; существующие TCP-потоки закрываются.
 
+H3 поддерживает миграцию локального UDP-сокета с сохранением сессии и потоков.
+`client.Manager.Migrate(ctx)` можно вызвать по событию смены сети. После
+неуспешной проверки пути соединение также пробует миграцию автоматически;
+если новый путь не работает, менеджер переподключается. Смена удалённого порта
+живого соединения не реализована: `ports` участвует в установлении соединения.
+Keepalive и проверка здоровья идут со случайным интервалом 10–25 секунд.
+В JSON `limits` интервалы задаются в наносекундах: `keepalive_min_ns`,
+`keepalive_max_ns`, `connection_idle_timeout_ns` (по умолчанию 60 секунд).
+`idle_timeout_ns` отдельно ограничивает простой UDP-туннеля. При настройке
+keepalive максимальный интервал вместе с бюджетом `open_timeout_ns` должен
+быть меньше connection idle timeout на обеих сторонах.
+
 Ветвь меняет прежний Go API и несовместима с удалённым wire `quri/1`.
-`0 allocs/op` подтверждено для DATAGRAM codec, не для всего UDP-тракта.
-Migration/port rotation, Chrome fingerprint, padding и BBR ещё не приняты.
+`0 allocs/op` подтверждено для DATAGRAM codec, capsule decoder и direct UDP,
+не для всего UDP-тракта. Ротация удалённых портов, Chrome fingerprint,
+стартовый padding и эксперимент с BBR ещё не реализованы.
 Сайт и ALPN h3 сами по себе не доказывают устойчивость к DPI/зондированию.
 
 Изменения и текущие границы проверки — [CHANGELOG.md](CHANGELOG.md).

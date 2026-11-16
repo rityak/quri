@@ -21,6 +21,7 @@ jobs:
       - run: go vet ./...
       - run: go test ./transport -run '^$' -bench 'Benchmark(DatagramCodec|CapsuleDecode)' -benchmem
       - run: go test ./route -run '^$' -bench BenchmarkDirectUDPRoundTrip -benchmem
+      - run: go test ./session -run '^$' -bench BenchmarkUDPRoundTrip -benchtime=1000x -benchmem
       - name: Fuzz binary parsers
         # Count-based budgets avoid the duration-expiry race in golang/go#75804.
         run: |
@@ -51,7 +52,7 @@ jobs:
         if: matrix.module == 'mirayintegration'
         with:
           repository: rityak/miray
-          ref: fd8d205aec84cc3d722e03a7cac624a1cfe15015
+          ref: e9d2a1f6c3e7b7cb5bdde12b18b39044270e794a
           path: miray
       - uses: actions/setup-go@v5
         with:
