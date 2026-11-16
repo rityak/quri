@@ -152,6 +152,9 @@ func TestHTTPRelayTCPAndUDP(t *testing.T) {
 			}
 			var buffer [2048]byte
 			n, addr, err := packet.ReadFrom(buffer[:])
+			if _, ok := addr.(*net.UDPAddr); err == nil && !ok {
+				t.Fatalf("numeric UDP source type = %T, want *net.UDPAddr", addr)
+			}
 			if err != nil || string(buffer[:n]) != "one-udp-packet" || addr.String() != targetUDP.LocalAddr().String() {
 				t.Fatalf("UDP=%q %v %v", buffer[:n], addr, err)
 			}

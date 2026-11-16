@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"net/netip"
 	"os"
 	"sync"
 	"time"
@@ -78,6 +79,9 @@ func (p *PacketConn) target(ctx context.Context, address string) (*udpTarget, er
 	if err != nil {
 		return nil, err
 	}
+	if endpoint, err := netip.ParseAddrPort(address); err == nil {
+		addr = net.UDPAddrFromAddrPort(netip.AddrPortFrom(endpoint.Addr().Unmap(), endpoint.Port()))
+	}
 	tunnel, err := p.session.conn.Open(ctx, address, true)
 	if err != nil {
 		return nil, err
@@ -142,6 +146,7 @@ func (p *PacketConn) WriteTo(data []byte, addr net.Addr) (int, error) {
 }
 
 // ReadFrom returns complete datagrams; short buffers consume one packet.
+// Source addresses are shared per destination; copy them before modifying.
 func (p *PacketConn) ReadFrom(dst []byte) (int, net.Addr, error) {
 	for {
 		p.mu.Lock()

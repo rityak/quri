@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Returned numeric UDP sources as cached net.UDPAddr values. The core tunnel
+  otherwise replaced replies from different destinations with the first
+  destination's address, breaking destination-independent UDP associations.
+
 - Enabled dual-stack resolution at standalone quri-relay startup; importing
   core outbounds without loading core configuration previously rejected IPv6
   relay endpoints with an IP-version error.
