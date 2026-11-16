@@ -19,7 +19,7 @@ jobs:
           cache: true
       - run: go test -race ./... -count=1 -timeout=3m
       - run: go vet ./...
-      - run: go test ./transport -run '^$' -bench BenchmarkDatagramCodec -benchmem
+      - run: go test ./transport -run '^$' -bench 'Benchmark(DatagramCodec|CapsuleDecode)' -benchmem
       - run: go test ./route -run '^$' -bench BenchmarkDirectUDPRoundTrip -benchmem
       - name: Fuzz binary parsers
         # Count-based budgets avoid the duration-expiry race in golang/go#75804.
@@ -58,6 +58,8 @@ jobs:
           go-version: '1.26.x'
           cache-dependency-path: quri/${{ matrix.module }}/go.sum
       - run: go test -race ./... -count=1 -timeout=3m
+        working-directory: quri/${{ matrix.module }}
+      - run: go mod tidy -diff
         working-directory: quri/${{ matrix.module }}
       - name: Build and smoke-test the Linux installer
         if: matrix.module == 'mirayintegration'
