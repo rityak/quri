@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Enabled dual-stack resolution at standalone quri-relay startup; importing
+  core outbounds without loading core configuration previously rejected IPv6
+  relay endpoints with an IP-version error.
+
 - Added HTTP/3 CONNECT and CONNECT-UDP with connection-bound TLS-exporter HMAC
   authentication and an external website backend for ordinary requests.
 - Added HTTP/2 CONNECT fallback; UDP uses reliable ordered DATAGRAM capsules
