@@ -25,7 +25,6 @@ const (
 	maxPorts         = 16
 	initialBackoff   = 100 * time.Millisecond
 	maximumBackoff   = 5 * time.Second
-	healthInterval   = 15 * time.Second
 )
 
 // Config is a session profile with one fixed relay outbound.
@@ -259,8 +258,6 @@ func (m *Manager) connect(ctx context.Context) (*session.Session, error) {
 
 func (m *Manager) run() error {
 	defer m.cancel()
-	ticker := time.NewTicker(healthInterval)
-	defer ticker.Stop()
 	backoff := initialBackoff
 	for {
 		m.mu.Lock()
@@ -270,13 +267,6 @@ func (m *Manager) run() error {
 		case <-m.ctx.Done():
 			return nil
 		case <-current.Done():
-		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(m.ctx, m.limits.OpenTimeout)
-			err := current.Probe(ctx)
-			cancel()
-			if err == nil {
-				continue
-			}
 		}
 		_ = current.Close() //nolint:errcheck // Terminated streams cannot migrate into a replacement session. Cancellation cleanup cannot change the completed operation result.
 		for {

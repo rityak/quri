@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math/rand/v2"
 	"net"
 	"net/netip"
 	"net/url"
@@ -58,8 +59,8 @@ type Conn struct {
 
 func quicConfig(limits config.Config) *quic.Config {
 	return &quic.Config{Versions: []quic.Version{quic.Version1}, EnableDatagrams: true,
-		HandshakeIdleTimeout: limits.HandshakeTimeout, MaxIdleTimeout: limits.IdleTimeout,
-		KeepAlivePeriod: config.DefaultKeepAlive, InitialPacketSize: 1200,
+		HandshakeIdleTimeout: limits.HandshakeTimeout, MaxIdleTimeout: limits.ConnectionIdleTimeout,
+		InitialPacketSize:  1200,
 		MaxIncomingStreams: int64(limits.MaxStreams + 4), MaxIncomingUniStreams: 8,
 		InitialStreamReceiveWindow: 64 << 10, MaxStreamReceiveWindow: 64 << 10,
 		InitialConnectionReceiveWindow: 8 << 20, MaxConnectionReceiveWindow: 8 << 20}
@@ -352,41 +353,61 @@ func (c *Conn) Close() error {
 	return c.closeErr
 }
 
-// Activate starts bounded stale-ICMP verification after session configuration.
+// Activate starts jittered health checks and bounded stale-ICMP verification.
 func (c *Conn) Activate() error {
 	c.lifecycle.Lock()
 	defer c.lifecycle.Unlock()
 	if c.closed || c.ctx.Err() != nil {
 		return net.ErrClosed
 	}
-	if c.quic == nil || c.active.Swap(true) {
+	if c.active.Swap(true) {
 		return nil
 	}
 	c.workers.Go(func() error {
+		timer := time.NewTimer(c.keepAliveInterval())
+		defer timer.Stop()
+		var lastProbe time.Time
 		for {
 			select {
 			case <-c.ctx.Done():
 				return nil
 			case <-c.refused:
+				if time.Since(lastProbe) < config.DefaultPathProbeCooldown {
+					continue
+				}
+			case <-timer.C:
+			}
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
 			}
 			ctx, cancel := context.WithTimeout(c.ctx, c.limits.OpenTimeout)
 			err := c.Probe(ctx)
 			cancel()
 			if err != nil {
 				c.cancel()
-				_ = c.quic.CloseWithError(0x102, "") //nolint:errcheck // Failed path verification terminates the owned connection; Close joins this worker.
+				if c.quic != nil {
+					_ = c.quic.CloseWithError(0x102, "") //nolint:errcheck // Close joins this worker and collects transport cleanup errors.
+				} else {
+					_ = c.raw.Close() //nolint:errcheck // Cancel the blocked HTTP/2 connection; Close joins this worker.
+				}
 				return nil
 			}
-			timer := time.NewTimer(time.Second)
-			select {
-			case <-c.ctx.Done():
-				timer.Stop()
-				return nil
-			case <-timer.C:
-			}
+			lastProbe = time.Now()
+			timer.Reset(c.keepAliveInterval())
 		}
 	})
 	return nil
+}
+
+func (c *Conn) keepAliveInterval() time.Duration {
+	span := c.limits.KeepAliveMax - c.limits.KeepAliveMin
+	if span == 0 {
+		return c.limits.KeepAliveMin
+	}
+	return c.limits.KeepAliveMin + time.Duration(rand.Int64N(int64(span))) //nolint:gosec // Scheduling jitter is not a security primitive.
 }
 
 func validateTarget(target string) error {
@@ -402,6 +423,9 @@ func (c *Conn) Probe(ctx context.Context) error {
 	response, err := c.RoundTrip(req)
 	if err != nil {
 		return err
+	}
+	if response.StatusCode != http.StatusNoContent {
+		return errors.Join(errors.New("relay health check was not authenticated"), response.Body.Close())
 	}
 	return response.Body.Close()
 }

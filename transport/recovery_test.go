@@ -38,6 +38,75 @@ func (s *refusedSocket) WriteTo(b []byte, addr net.Addr) (int, error) {
 	return s.PacketConn.WriteTo(b, addr)
 }
 
+func TestJitteredHealthChecksRequireAuthenticatedResponse(t *testing.T) {
+	limits := (config.Config{KeepAliveMin: 10 * time.Millisecond, KeepAliveMax: 25 * time.Millisecond}).WithDefaults()
+	c := &Conn{limits: limits}
+	intervals := make(map[time.Duration]bool)
+	for range 32 {
+		interval := c.keepAliveInterval()
+		if interval < limits.KeepAliveMin || interval >= limits.KeepAliveMax {
+			t.Fatalf("keepalive outside configured bounds: %s", interval)
+		}
+		intervals[interval] = true
+	}
+	if len(intervals) == 1 || quicConfig(limits).KeepAlivePeriod != 0 {
+		t.Fatal("fixed-period keepalive is still enabled")
+	}
+	for _, protocol := range []string{"h3", "h2"} {
+		t.Run(protocol, func(t *testing.T) {
+			serverTLS, clientTLS := testcert.TLS(t)
+			tcp, udp, err := ListenSockets("127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			token := strings.Repeat("health-secret-", 3)
+			verifier, err := auth.New(map[string]string{testPrincipal: token})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var probes atomic.Int64
+			server, err := NewServer(tcp, udp, ServerOptions{TLS: serverTLS, Auth: verifier, Website: testWebsite(), Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if probes.Add(1) == 1 {
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+			})})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			done := make(chan error, 1)
+			go func() { done <- server.Serve(ctx) }()
+			defer func() {
+				cancel()
+				if err := <-done; err != nil {
+					t.Error(err)
+				}
+			}()
+			conn, err := Dial(ctx, tcp.Addr().String(), ClientOptions{TLS: clientTLS, Protocol: protocol, Limits: limits})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer closeTest(t, conn)
+			if err := conn.Authenticate(ctx, token); err != nil {
+				t.Fatal(err)
+			}
+			if err := conn.Activate(); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-conn.Context().Done():
+			case <-ctx.Done():
+				t.Fatal("unhealthy relay did not close without a client manager")
+			}
+			if probes.Load() != 2 {
+				t.Fatalf("unexpected health request count: %d", probes.Load())
+			}
+		})
+	}
+}
+
 func TestICMPUsesBoundedAuthenticatedVerification(t *testing.T) {
 	for _, blackhole := range []bool{false, true} {
 		t.Run(map[bool]string{false: "stale", true: "blackhole"}[blackhole], func(t *testing.T) {

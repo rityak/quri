@@ -128,8 +128,8 @@ func (s *Server) Serve(ctx context.Context) error {
 func (s *Server) serveH2(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	var connections errgroup.Group
-	defer func() { cancel(); _ = connections.Wait() }()                                                                                                                //nolint:errcheck // All connection handlers return nil after closing their socket. All workers return nil and report failures through their result channel.
-	server := &http2.Server{EnableExtendedConnectProtocol: true, MaxConcurrentStreams: uint32(s.options.Limits.MaxStreams), IdleTimeout: s.options.Limits.IdleTimeout} //nolint:gosec // Config.Validate bounds MaxStreams to 1024.
+	defer func() { cancel(); _ = connections.Wait() }()                                                                                                                          //nolint:errcheck // All connection handlers return nil after closing their socket. All workers return nil and report failures through their result channel.
+	server := &http2.Server{EnableExtendedConnectProtocol: true, MaxConcurrentStreams: uint32(s.options.Limits.MaxStreams), IdleTimeout: s.options.Limits.ConnectionIdleTimeout} //nolint:gosec // Config.Validate bounds MaxStreams to 1024.
 	for {
 		raw, err := s.tcp.Accept()
 		if err != nil {
