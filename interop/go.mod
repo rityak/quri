@@ -3,6 +3,7 @@ module github.com/rityak/quri/interop
 go 1.26.0
 
 require (
+	github.com/metacubex/http v0.1.8
 	github.com/quic-go/quic-go v0.64.1
 	github.com/rityak/quri v0.0.0
 )
@@ -11,7 +12,6 @@ require (
 	github.com/metacubex/cpu v0.1.0 // indirect
 	github.com/metacubex/hkdf v0.1.0 // indirect
 	github.com/metacubex/hpke v0.1.0 // indirect
-	github.com/metacubex/http v0.1.8 // indirect
 	github.com/metacubex/mlkem v0.1.0 // indirect
 	github.com/metacubex/qpack v0.6.0 // indirect
 	github.com/metacubex/quic-go v0.61.1-0.20260727080200-2548683b76f4 // indirect
