@@ -111,6 +111,16 @@ func Dial(ctx context.Context, cfg Config) (*Manager, error) {
 
 type candidate struct{ address, protocol string }
 
+// Migrate refreshes the current h3 path after a host network change.
+// HTTP/2 requires reconnection and returns transport.ErrMigrationUnsupported.
+func (m *Manager) Migrate(ctx context.Context) error {
+	current, err := m.currentSession(ctx)
+	if err != nil {
+		return err
+	}
+	return current.Migrate(ctx)
+}
+
 func (m *Manager) candidates(ctx context.Context) ([]candidate, error) {
 	host, service, err := net.SplitHostPort(m.cfg.Address)
 	if err != nil {

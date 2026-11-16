@@ -9,21 +9,22 @@ import (
 // Defaults apply to both HTTP transports.
 const (
 	// ControlPath is shared by the authenticated configuration and health endpoints.
-	ControlPath              = "/api/session"
-	DefaultHandshakeTimeout  = 5 * time.Second
-	DefaultOpenTimeout       = 5 * time.Second
-	DefaultIdleTimeout       = 60 * time.Second
-	DefaultFallbackDelay     = 250 * time.Millisecond
-	DefaultMaxConnections    = 64
-	DefaultMaxStreams        = 64
-	DefaultMaxUDPTargets     = 32
-	DefaultMaxDatagram       = 1150
-	DefaultMaxControl        = 1 << 20
-	DefaultQueueSize         = 16
-	DefaultKeepAliveMin      = 10 * time.Second
-	DefaultKeepAliveMax      = 25 * time.Second
-	DefaultPathProbeCooldown = time.Second
-	DefaultDatagramLifetime  = 100 * time.Millisecond
+	ControlPath               = "/api/session"
+	DefaultHandshakeTimeout   = 5 * time.Second
+	DefaultOpenTimeout        = 5 * time.Second
+	DefaultIdleTimeout        = 60 * time.Second
+	DefaultFallbackDelay      = 250 * time.Millisecond
+	DefaultMaxConnections     = 64
+	DefaultMaxStreams         = 64
+	DefaultMaxUDPTargets      = 32
+	DefaultMaxDatagram        = 1150
+	DefaultConnectionIDLength = 8
+	DefaultMaxControl         = 1 << 20
+	DefaultQueueSize          = 16
+	DefaultKeepAliveMin       = 10 * time.Second
+	DefaultKeepAliveMax       = 25 * time.Second
+	DefaultPathProbeCooldown  = time.Second
+	DefaultDatagramLifetime   = 100 * time.Millisecond
 )
 
 // Config bounds independently owned connections, streams and UDP queues.

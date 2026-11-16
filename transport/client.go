@@ -36,25 +36,29 @@ type ClientOptions struct {
 
 // Conn is one authenticated HTTP connection; requests never use a connection pool.
 type Conn struct {
-	ctx       context.Context
-	cancel    context.CancelFunc
-	h3        *http3.ClientConn
-	quic      *quic.Conn
-	h2        *http2.ClientConn
-	socket    net.PacketConn
-	transport *quic.Transport
-	raw       net.Conn
-	binding   []byte
-	origin    string
-	protocol  string
-	limits    config.Config
-	once      sync.Once
-	closeErr  error
-	lifecycle sync.Mutex
-	closed    bool
-	active    atomic.Bool
-	refused   chan struct{}
-	workers   errgroup.Group
+	ctx           context.Context
+	cancel        context.CancelFunc
+	h3            *http3.ClientConn
+	quic          *quic.Conn
+	h2            *http2.ClientConn
+	socket        net.PacketConn
+	transport     *quic.Transport
+	raw           net.Conn
+	binding       []byte
+	origin        string
+	protocol      string
+	limits        config.Config
+	once          sync.Once
+	closeErr      error
+	lifecycle     sync.Mutex
+	closed        bool
+	active        atomic.Bool
+	refused       chan struct{}
+	workers       errgroup.Group
+	pathMu        sync.Mutex
+	listenPacket  func(context.Context, netip.AddrPort) (net.PacketConn, error)
+	endpoint      netip.AddrPort
+	local, remote net.Addr
 }
 
 func quicConfig(limits config.Config) *quic.Config {
@@ -105,6 +109,8 @@ func Dial(ctx context.Context, address string, options ClientOptions) (*Conn, er
 		if err != nil {
 			return nil, err
 		}
+		c.endpoint = netip.AddrPortFrom(remote.AddrPort().Addr().Unmap(), remote.AddrPort().Port())
+		c.listenPacket = options.ListenPacket
 		if options.ListenPacket != nil {
 			endpoint := remote.AddrPort()
 			endpoint = netip.AddrPortFrom(endpoint.Addr().Unmap(), endpoint.Port())
@@ -115,7 +121,7 @@ func Dial(ctx context.Context, address string, options ClientOptions) (*Conn, er
 		if err != nil {
 			return nil, err
 		}
-		c.transport = &quic.Transport{Conn: c.socket}
+		c.transport = &quic.Transport{Conn: c.socket, ConnectionIDLength: config.DefaultConnectionIDLength}
 		c.transport.SetSingleUse(true)
 		qc := quicConfig(limits)
 		qc.ConnectionRefused = func() bool {
@@ -133,6 +139,7 @@ func Dial(ctx context.Context, address string, options ClientOptions) (*Conn, er
 			return nil, err
 		}
 		state = c.quic.ConnectionState().TLS
+		c.local, c.remote = c.quic.LocalAddr(), c.quic.RemoteAddr()
 		context.AfterFunc(c.quic.Context(), cancel)
 		c.h3 = (&http3.Transport{EnableDatagrams: true, DisableCompression: true, MaxResponseHeaderBytes: limits.MaxControl}).NewClientConn(c.quic)
 	} else {
@@ -288,7 +295,7 @@ func (c *Conn) Open(ctx context.Context, target string, udp bool) (Tunnel, error
 			cancelRequest()
 			return nil, err
 		}
-		tunnel := newH3Tunnel(stream, c.quic.LocalAddr(), c.quic.RemoteAddr(), cancelRequest, c.limits.MaxDatagram)
+		tunnel := newH3Tunnel(stream, c.local, c.remote, cancelRequest, c.limits.MaxDatagram)
 		abort := context.AfterFunc(opCtx, func() { _ = tunnel.Close() }) //nolint:errcheck // Cancellation cleanup cannot change the completed operation result.
 		defer abort()
 		if err := stream.SendRequestHeader(req); err != nil {
@@ -328,6 +335,7 @@ func (c *Conn) Close() error {
 		c.closed = true
 		c.cancel()
 		c.lifecycle.Unlock()
+		c.pathMu.Lock()
 		var errs []error
 		if c.quic != nil {
 			errs = append(errs, c.quic.CloseWithError(0, ""))
@@ -348,6 +356,7 @@ func (c *Conn) Close() error {
 				c.closeErr = errors.Join(c.closeErr, err)
 			}
 		}
+		c.pathMu.Unlock()
 		c.closeErr = errors.Join(c.closeErr, c.workers.Wait())
 	})
 	return c.closeErr
@@ -386,6 +395,9 @@ func (c *Conn) Activate() error {
 			ctx, cancel := context.WithTimeout(c.ctx, c.limits.OpenTimeout)
 			err := c.Probe(ctx)
 			cancel()
+			if err != nil && c.quic != nil && !errors.Is(err, errHealthResponse) {
+				err = c.Migrate(c.ctx)
+			}
 			if err != nil {
 				c.cancel()
 				if c.quic != nil {
@@ -425,7 +437,7 @@ func (c *Conn) Probe(ctx context.Context) error {
 		return err
 	}
 	if response.StatusCode != http.StatusNoContent {
-		return errors.Join(errors.New("relay health check was not authenticated"), response.Body.Close())
+		return errors.Join(errHealthResponse, response.Body.Close())
 	}
 	return response.Body.Close()
 }

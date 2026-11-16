@@ -108,8 +108,11 @@ func TestJitteredHealthChecksRequireAuthenticatedResponse(t *testing.T) {
 }
 
 func TestICMPUsesBoundedAuthenticatedVerification(t *testing.T) {
-	for _, blackhole := range []bool{false, true} {
-		t.Run(map[bool]string{false: "stale", true: "blackhole"}[blackhole], func(t *testing.T) {
+	for _, scenario := range []struct {
+		name                        string
+		dropInitial, dropCandidates bool
+	}{{name: "stale"}, {name: "recover", dropInitial: true}, {name: "blackhole", dropInitial: true, dropCandidates: true}} {
+		t.Run(scenario.name, func(t *testing.T) {
 			serverTLS, clientTLS := testcert.TLS(t)
 			tcp, udp, err := ListenSockets("127.0.0.1:0")
 			if err != nil {
@@ -143,13 +146,19 @@ func TestICMPUsesBoundedAuthenticatedVerification(t *testing.T) {
 				}
 			}()
 			var socket *refusedSocket
+			var created atomic.Int64
 			conn, err := Dial(ctx, tcp.Addr().String(), ClientOptions{TLS: clientTLS, Protocol: "h3", Limits: config.Config{OpenTimeout: 150 * time.Millisecond}, ListenPacket: func(ctx context.Context, remote netip.AddrPort) (net.PacketConn, error) {
 				pc, err := net.ListenPacket("udp", "127.0.0.1:0")
 				if err != nil {
 					return nil, err
 				}
-				socket = &refusedSocket{PacketConn: pc}
-				return socket, nil
+				candidate := &refusedSocket{PacketConn: pc}
+				if created.Add(1) == 1 {
+					socket = candidate
+				} else {
+					candidate.drop.Store(scenario.dropCandidates)
+				}
+				return candidate, nil
 			}})
 			if err != nil {
 				t.Fatal(err)
@@ -161,12 +170,12 @@ func TestICMPUsesBoundedAuthenticatedVerification(t *testing.T) {
 			if err := conn.Activate(); err != nil {
 				t.Fatal(err)
 			}
-			socket.drop.Store(blackhole)
+			socket.drop.Store(scenario.dropInitial)
 			socket.refused.Store(true)
 			if err := socket.SetReadDeadline(time.Now()); err != nil {
 				t.Fatal(err)
 			}
-			if blackhole {
+			if scenario.dropCandidates {
 				select {
 				case <-conn.Context().Done():
 				case <-ctx.Done():
@@ -183,6 +192,9 @@ func TestICMPUsesBoundedAuthenticatedVerification(t *testing.T) {
 			}
 			if err := conn.Probe(ctx); err != nil {
 				t.Fatal(err)
+			}
+			if scenario.dropInitial && created.Load() != 2 {
+				t.Fatalf("failed path was not migrated once: %d sockets", created.Load())
 			}
 		})
 	}

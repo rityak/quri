@@ -93,6 +93,9 @@ func (s *Session) Protocol() string { return s.conn.Protocol() }
 // Probe performs a bounded HTTP health check on this connection.
 func (s *Session) Probe(ctx context.Context) error { return s.conn.Probe(ctx) }
 
+// Migrate preserves this session and its flows while validating a fresh UDP path.
+func (s *Session) Migrate(ctx context.Context) error { return s.conn.Migrate(ctx) }
+
 // DialContext opens a standard CONNECT stream and detaches after establishment.
 func (s *Session) DialContext(ctx context.Context, target string) (net.Conn, error) {
 	return s.conn.Open(ctx, target, false)
