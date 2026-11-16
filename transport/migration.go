@@ -24,8 +24,14 @@ func (c *Conn) Migrate(ctx context.Context) (result error) {
 	if c.quic == nil {
 		return ErrMigrationUnsupported
 	}
-	c.pathMu.Lock()
-	defer c.pathMu.Unlock()
+	select {
+	case c.pathGate <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-c.ctx.Done():
+		return net.ErrClosed
+	}
+	defer func() { <-c.pathGate }()
 	if c.ctx.Err() != nil {
 		return net.ErrClosed
 	}

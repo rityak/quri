@@ -55,7 +55,7 @@ type Conn struct {
 	active        atomic.Bool
 	refused       chan struct{}
 	workers       errgroup.Group
-	pathMu        sync.Mutex
+	pathGate      chan struct{}
 	listenPacket  func(context.Context, netip.AddrPort) (net.PacketConn, error)
 	endpoint      netip.AddrPort
 	local, remote net.Addr
@@ -94,7 +94,7 @@ func Dial(ctx context.Context, address string, options ClientOptions) (*Conn, er
 	dialCtx, stop := context.WithTimeout(ctx, limits.HandshakeTimeout)
 	defer stop()
 	ownedCtx, cancel := context.WithCancel(context.Background())
-	c := &Conn{ctx: ownedCtx, cancel: cancel, origin: "https://" + net.JoinHostPort(tc.ServerName, "443"), protocol: options.Protocol, limits: limits, refused: make(chan struct{}, 1)}
+	c := &Conn{ctx: ownedCtx, cancel: cancel, origin: "https://" + net.JoinHostPort(tc.ServerName, "443"), protocol: options.Protocol, limits: limits, refused: make(chan struct{}, 1), pathGate: make(chan struct{}, 1)}
 	failed := true
 	defer func() {
 		if failed {
@@ -333,7 +333,7 @@ func (c *Conn) Close() error {
 		c.closed = true
 		c.cancel()
 		c.lifecycle.Unlock()
-		c.pathMu.Lock()
+		c.pathGate <- struct{}{}
 		var errs []error
 		if c.quic != nil {
 			errs = append(errs, c.quic.CloseWithError(0, ""))
@@ -354,7 +354,7 @@ func (c *Conn) Close() error {
 				c.closeErr = errors.Join(c.closeErr, err)
 			}
 		}
-		c.pathMu.Unlock()
+		<-c.pathGate
 		c.closeErr = errors.Join(c.closeErr, c.workers.Wait())
 	})
 	return c.closeErr

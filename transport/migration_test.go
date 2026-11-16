@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/netip"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -88,6 +89,7 @@ func TestMigrationPreservesTunnelsAndReleasesSockets(t *testing.T) {
 	}()
 	var sockets []*migrationSocket
 	blackhole := false
+	candidateStarted := make(chan struct{}, 1)
 	conn, err := Dial(ctx, tcp.Addr().String(), ClientOptions{TLS: clientTLS, Protocol: "h3", ListenPacket: func(context.Context, netip.AddrPort) (net.PacketConn, error) {
 		pc, err := net.ListenPacket("udp4", "127.0.0.1:0")
 		if err != nil {
@@ -95,6 +97,9 @@ func TestMigrationPreservesTunnelsAndReleasesSockets(t *testing.T) {
 		}
 		socket := &migrationSocket{PacketConn: pc, drop: blackhole}
 		sockets = append(sockets, socket)
+		if blackhole {
+			candidateStarted <- struct{}{}
+		}
 		return socket, nil
 	}})
 	if err != nil {
@@ -143,8 +148,33 @@ func TestMigrationPreservesTunnelsAndReleasesSockets(t *testing.T) {
 		}
 	}
 	blackhole = true
-	probeCtx, stop := context.WithTimeout(ctx, 40*time.Millisecond)
-	err = conn.Migrate(probeCtx)
+	probeCtx, stop := context.WithTimeout(ctx, 200*time.Millisecond)
+	defer stop()
+	var workers sync.WaitGroup
+	defer workers.Wait()
+	failed, queued := make(chan error, 1), make(chan error, 1)
+	workers.Add(1)
+	go func() { defer workers.Done(); failed <- conn.Migrate(probeCtx) }()
+	select {
+	case <-candidateStarted:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	canceledCtx, canceled := context.WithCancel(ctx)
+	canceled()
+	workers.Add(1)
+	go func() { defer workers.Done(); queued <- conn.Migrate(canceledCtx) }()
+	waitCtx, endWait := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer endWait()
+	select {
+	case err := <-queued:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("queued migration ignored cancellation: %v", err)
+		}
+	case <-waitCtx.Done():
+		t.Fatal("canceled migration waited for the active path operation")
+	}
+	err = <-failed
 	stop()
 	if !errors.Is(err, context.DeadlineExceeded) || !sockets[len(sockets)-1].closed.Load() {
 		t.Fatalf("failed candidate cleanup: %v", err)
