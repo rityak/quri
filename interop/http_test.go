@@ -71,7 +71,7 @@ func TestHTTPClientAgainstStockHTTP3(t *testing.T) {
 			w.WriteHeader(http.StatusForbidden)
 			return
 		}
-		if r.Method == http.MethodPost {
+		if r.Method == http.MethodPost || r.Method == http.MethodHead {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -130,6 +130,9 @@ func TestHTTPClientAgainstStockHTTP3(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := manager.Migrate(ctx); err != nil {
+		t.Fatalf("stock TCP migration: %v", err)
+	}
 	if _, err := io.WriteString(stream, "upload"); err != nil {
 		t.Fatal(err)
 	}
@@ -162,6 +165,16 @@ func TestHTTPClientAgainstStockHTTP3(t *testing.T) {
 	n, _, err := packet.ReadFrom(buf[:])
 	if err != nil || string(buf[:n]) != "one-datagram" {
 		t.Fatalf("stock UDP: %q %v", buf[:n], err)
+	}
+	if err := manager.Migrate(ctx); err != nil {
+		t.Fatalf("stock UDP migration: %v", err)
+	}
+	if _, err := packet.WriteTo([]byte("after-migration"), addr); err != nil {
+		t.Fatal(err)
+	}
+	n, _, err = packet.ReadFrom(buf[:])
+	if err != nil || string(buf[:n]) != "after-migration" {
+		t.Fatalf("stock migrated UDP: %q %v", buf[:n], err)
 	}
 }
 

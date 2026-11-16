@@ -65,9 +65,7 @@ func quicConfig(limits config.Config) *quic.Config {
 	return &quic.Config{Versions: []quic.Version{quic.Version1}, EnableDatagrams: true,
 		HandshakeIdleTimeout: limits.HandshakeTimeout, MaxIdleTimeout: limits.ConnectionIdleTimeout,
 		InitialPacketSize:  1200,
-		MaxIncomingStreams: int64(limits.MaxStreams + 4), MaxIncomingUniStreams: 8,
-		InitialStreamReceiveWindow: 64 << 10, MaxStreamReceiveWindow: 64 << 10,
-		InitialConnectionReceiveWindow: 8 << 20, MaxConnectionReceiveWindow: 8 << 20}
+		MaxIncomingStreams: int64(limits.MaxStreams + 4), MaxIncomingUniStreams: 8}
 }
 
 // Dial verifies TLS and negotiates exactly h3 or h2. It never sends credentials.
