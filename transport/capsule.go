@@ -41,21 +41,23 @@ func AppendCapsule(dst, payload []byte) []byte {
 // ReadCapsule copies one context-zero payload into dst. Unknown capsule types
 // are skipped with bounded storage; oversized capsules terminate the tunnel.
 func ReadCapsule(r io.Reader, dst []byte, limit int) (int, error) {
+	var scratch [8]byte
+	return readCapsule(r, dst, limit, &scratch)
+}
+
+func readCapsule(r io.Reader, dst []byte, limit int, scratch *[8]byte) (int, error) {
 	if limit < 0 || limit > 65507 {
 		return 0, errProtocol
 	}
-	var first [1]byte
 	readVarint := func() (uint64, error) {
-		if _, err := io.ReadFull(r, first[:]); err != nil {
+		if _, err := io.ReadFull(r, scratch[:1]); err != nil {
 			return 0, err
 		}
-		var buf [8]byte
-		buf[0] = first[0]
-		size := 1 << (first[0] >> 6)
-		if _, err := io.ReadFull(r, buf[1:size]); err != nil {
+		size := 1 << (scratch[0] >> 6)
+		if _, err := io.ReadFull(r, scratch[1:size]); err != nil {
 			return 0, err
 		}
-		n, _, err := quicvarint.Parse(buf[:size])
+		n, _, err := quicvarint.Parse(scratch[:size])
 		return n, err
 	}
 	for {
@@ -79,19 +81,17 @@ func ReadCapsule(r io.Reader, dst []byte, limit int) (int, error) {
 		if length == 0 {
 			return 0, errProtocol
 		}
-		if _, err := io.ReadFull(r, first[:]); err != nil {
+		if _, err := io.ReadFull(r, scratch[:1]); err != nil {
 			return 0, err
 		}
-		contextSize := 1 << (first[0] >> 6)
+		contextSize := 1 << (scratch[0] >> 6)
 		if uint64(contextSize) > length {
 			return 0, errProtocol
 		}
-		var contextBytes [8]byte
-		contextBytes[0] = first[0]
-		if _, err := io.ReadFull(r, contextBytes[1:contextSize]); err != nil {
+		if _, err := io.ReadFull(r, scratch[1:contextSize]); err != nil {
 			return 0, err
 		}
-		contextID, _, err := quicvarint.Parse(contextBytes[:contextSize])
+		contextID, _, err := quicvarint.Parse(scratch[:contextSize])
 		if err != nil {
 			return 0, errProtocol
 		}

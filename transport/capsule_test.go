@@ -48,3 +48,17 @@ func BenchmarkDatagramCodec(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkCapsuleDecode(b *testing.B) {
+	wire := AppendCapsule(nil, make([]byte, 1150))
+	r := bytes.NewReader(wire)
+	var dst [1150]byte
+	var scratch [8]byte
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		r.Reset(wire)
+		if n, err := readCapsule(r, dst[:], len(dst), &scratch); err != nil || n != len(dst) {
+			b.Fatalf("capsule decode: %d %v", n, err)
+		}
+	}
+}

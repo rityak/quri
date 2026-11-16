@@ -118,6 +118,8 @@ type h2Tunnel struct {
 	local, remote         net.Addr
 	cancel                context.CancelFunc
 	limit                 int
+	readMu                sync.Mutex
+	readScratch           [8]byte
 	writeMu               sync.Mutex
 	sendBuffer            []byte
 	mu                    sync.Mutex
@@ -205,7 +207,9 @@ func (t *h2Tunnel) SendDatagram(ctx context.Context, payload []byte) error {
 func (t *h2Tunnel) ReceiveDatagram(ctx context.Context, dst []byte) (int, error) {
 	stop := context.AfterFunc(ctx, func() { _ = t.Close() }) //nolint:errcheck // Cancellation cleanup cannot change the completed operation result.
 	defer stop()
-	return ReadCapsule(t.reader, dst, t.limit)
+	t.readMu.Lock()
+	defer t.readMu.Unlock()
+	return readCapsule(t.reader, dst, t.limit, &t.readScratch)
 }
 
 func writeAll(w io.Writer, data []byte) error {
