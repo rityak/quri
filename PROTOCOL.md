@@ -29,6 +29,11 @@ is rejected. Authenticated HEAD `/api/session` is a relay-only health check.
 HTTP CONNECT authority identifies `host:port`. The server establishes the
 outbound before returning 200. HTTP DATA carries the byte stream. END_STREAM/FIN
 closes one direction; opposite-direction upload/download may continue.
+Closing a flow sends FIN before aborting its receive direction. An h2 client
+waits for the request body and END_STREAM to be flushed before cancelling the
+response, bounded by the open-operation budget. Connection shutdown still aborts
+active flows. A response-side HTTP request cancellation does not close the entire
+TCP target; stream errors and connection termination own that cleanup.
 With h2, an expired client-side deadline aborts that request because the pinned
 client API does not expose resumable stream deadlines. Neighboring requests
 remain usable.
@@ -43,6 +48,9 @@ For h3, RFC 9297 HTTP Datagrams use the library's quarter-stream-ID prefix,
 then context ID zero, then one entire UDP payload. Datagrams larger than the
 configured limit or current path MTU are dropped. There is no fragmentation,
 reassembly, retransmission, or reliable capsule fallback for h3 payloads.
+The default application limit is 65507 bytes, the IPv4 UDP payload maximum;
+the actual h3 capacity remains bounded by its dynamically discovered QUIC PMTU.
+An application limit below 1200 bytes prevents forwarding QUIC Initial packets.
 
 For h2, a type-zero DATAGRAM capsule carries its varint length, context zero,
 and UDP payload in the dedicated CONNECT-UDP HTTP DATA stream. This delivery

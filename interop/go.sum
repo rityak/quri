@@ -22,6 +22,8 @@ github.com/rityak/http v0.1.9-0.20261115170447-fb1f316d86fc h1:t+KhQ15y+ik85BvMR
 github.com/rityak/http v0.1.9-0.20261115170447-fb1f316d86fc/go.mod h1:Nxx0zZAo2AhRfanyL+fmmK6ACMtVsfpwIl1aFAik2Eg=
 github.com/rityak/quic-go v0.61.1-0.20261116090222-81fc43db6260 h1:3IuToko/QdqKW7Q0GKhhgM0ohMZ1m6HCeon6HHv81UU=
 github.com/rityak/quic-go v0.61.1-0.20261116090222-81fc43db6260/go.mod h1:KTmibo7vZo0gCxdFWrPEQ/u/RGt92mJkrXDE2Qg2/AU=
+github.com/rityak/quic-go v0.61.1-0.20261117054205-718b0410a157 h1:1YT0Tpdb2NgmY1c70/ZFepMh+n8gw3j0cC/+znAKYok=
+github.com/rityak/quic-go v0.61.1-0.20261117054205-718b0410a157/go.mod h1:KTmibo7vZo0gCxdFWrPEQ/u/RGt92mJkrXDE2Qg2/AU=
 github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWDWE=
 github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
 go.uber.org/goleak v1.3.0 h1:2K3zAYmnTNqV73imy9J1T3WC+gmCePx2hEGkimedGto=

@@ -1,8 +1,10 @@
 package session
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	mhttp "github.com/metacubex/http"
 	"io"
 	"net"
@@ -35,18 +37,39 @@ func TestHTTPRelayTCPAndUDP(t *testing.T) {
 			}
 			defer closeTest(t, targetTCP) // Test owns the target listener.
 			targetDone := make(chan error, 1)
+			closedUpload := strings.Repeat("closed-upload", 8192)
 			go func() {
-				conn, err := targetTCP.Accept()
-				if err != nil {
+				for transfer := 0; transfer < 3; transfer++ {
+					conn, err := targetTCP.Accept()
+					if err != nil {
+						targetDone <- err
+						return
+					}
+					_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+					if transfer == 1 {
+						_, err = io.WriteString(conn, "server-fin")
+						if err == nil {
+							err = conn.(*net.TCPConn).CloseWrite()
+						}
+						if err != nil {
+							_ = conn.Close()
+							targetDone <- err
+							return
+						}
+					}
+					body, err := io.ReadAll(conn)
+					if err == nil && transfer == 0 {
+						_, err = conn.Write(append([]byte("reply:"), body...))
+					}
+					if err == nil && transfer > 0 && string(body) != closedUpload {
+						err = fmt.Errorf("closed upload: got %d bytes, want %d", len(body), len(closedUpload))
+					}
+					err = errors.Join(err, conn.Close())
 					targetDone <- err
-					return
+					if err != nil {
+						return
+					}
 				}
-				defer closeTest(t, conn) // Test owns the accepted target connection.
-				body, err := io.ReadAll(conn)
-				if err == nil {
-					_, err = conn.Write(append([]byte("reply:"), body...))
-				}
-				targetDone <- err
 			}()
 			targetUDP, err := net.ListenPacket("udp", "127.0.0.1:0")
 			if err != nil {
@@ -56,7 +79,7 @@ func TestHTTPRelayTCPAndUDP(t *testing.T) {
 			var datagrams atomic.Int64
 			go func() {
 				defer close(udpDone)
-				var buffer [2048]byte
+				var buffer [65535]byte
 				for {
 					n, addr, err := targetUDP.ReadFrom(buffer[:])
 					if err != nil {
@@ -137,6 +160,39 @@ func TestHTTPRelayTCPAndUDP(t *testing.T) {
 			if err := <-targetDone; err != nil {
 				t.Fatal(err)
 			}
+			halfStream, err := session.DialContext(ctx, targetTCP.Addr().String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err = io.ReadAll(halfStream)
+			if err != nil || string(body) != "server-fin" {
+				t.Fatalf("server FIN: body=%q error=%v", body, err)
+			}
+			if _, err := io.WriteString(halfStream, closedUpload); err != nil {
+				t.Fatal(err)
+			}
+			if err := halfStream.(interface{ CloseWrite() error }).CloseWrite(); err != nil {
+				t.Fatal(err)
+			}
+			if err := <-targetDone; err != nil {
+				t.Fatal(err)
+			}
+			if err := halfStream.Close(); err != nil {
+				t.Fatal(err)
+			}
+			closedStream, err := session.DialContext(ctx, targetTCP.Addr().String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := io.WriteString(closedStream, closedUpload); err != nil {
+				t.Fatal(err)
+			}
+			if err := closedStream.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := <-targetDone; err != nil {
+				t.Fatal(err)
+			}
 			packet, err := session.ListenPacket(ctx)
 			if err != nil {
 				t.Fatal(err)
@@ -150,7 +206,7 @@ func TestHTTPRelayTCPAndUDP(t *testing.T) {
 			if _, err := packet.WriteTo([]byte("one-udp-packet"), targetUDP.LocalAddr()); err != nil {
 				t.Fatal(err)
 			}
-			var buffer [2048]byte
+			var buffer [65535]byte
 			n, addr, err := packet.ReadFrom(buffer[:])
 			if _, ok := addr.(*net.UDPAddr); err == nil && !ok {
 				t.Fatalf("numeric UDP source type = %T, want *net.UDPAddr", addr)
@@ -160,6 +216,18 @@ func TestHTTPRelayTCPAndUDP(t *testing.T) {
 			}
 			if datagrams.Load() != 1 {
 				t.Fatalf("target received %d packets, oversized packet was not dropped", datagrams.Load())
+			}
+			if protocol == "h2" {
+				for _, size := range []int{1200, 1350, 8192, 65507} {
+					payload := bytes.Repeat([]byte{byte(size)}, size)
+					if _, err := packet.WriteTo(payload, targetUDP.LocalAddr()); err != nil {
+						t.Fatalf("WriteTo(%d bytes): %v", size, err)
+					}
+					n, source, err := packet.ReadFrom(buffer[:])
+					if err != nil || !bytes.Equal(buffer[:n], payload) || source.String() != targetUDP.LocalAddr().String() {
+						t.Fatalf("UDP round trip (%d bytes): got %d bytes from %v, error %v", size, n, source, err)
+					}
+				}
 			}
 			if configurations.Load() != 1 {
 				t.Fatalf("route configured %d times", configurations.Load())

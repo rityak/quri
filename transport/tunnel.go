@@ -45,7 +45,7 @@ type h3Tunnel struct {
 }
 
 func newH3Tunnel(stream h3Stream, local, remote net.Addr, cancel context.CancelFunc, limit int) *h3Tunnel {
-	return &h3Tunnel{h3Stream: stream, local: local, remote: remote, cancel: cancel, limit: limit, sendBuffer: make([]byte, limit+1)}
+	return &h3Tunnel{h3Stream: stream, local: local, remote: remote, cancel: cancel, limit: limit}
 }
 func (t *h3Tunnel) LocalAddr() net.Addr  { return t.local }
 func (t *h3Tunnel) RemoteAddr() net.Addr { return t.remote }
@@ -67,11 +67,15 @@ func (t *h3Tunnel) CloseWrite() error {
 	return err
 }
 func (t *h3Tunnel) Close() error {
+	// A past deadline unblocks a concurrent Write without discarding accepted data.
+	_ = t.h3Stream.SetWriteDeadline(time.Now())
+	if !t.writeClosed.Load() {
+		if err := t.CloseWrite(); err != nil {
+			t.CancelWrite(quic.StreamErrorCode(0x10c))
+		}
+	}
 	t.cancel()
 	t.CancelRead(quic.StreamErrorCode(0x10c))
-	if !t.writeClosed.Load() {
-		t.CancelWrite(quic.StreamErrorCode(0x10c))
-	}
 	return nil
 }
 func (t *h3Tunnel) SendDatagram(ctx context.Context, payload []byte) error {
@@ -83,6 +87,9 @@ func (t *h3Tunnel) SendDatagram(ctx context.Context, payload []byte) error {
 	}
 	t.writeMu.Lock()
 	defer t.writeMu.Unlock()
+	if cap(t.sendBuffer) < len(payload)+1 {
+		t.sendBuffer = make([]byte, len(payload)+1)
+	}
 	var oversized *quic.DatagramTooLargeError
 	deadline, _ := ctx.Deadline()
 	expires := time.Now().Add(config.DefaultDatagramLifetime)
@@ -126,10 +133,13 @@ type h2Tunnel struct {
 	closed                bool
 	closeDone             chan struct{}
 	readTimer, writeTimer *time.Timer
+	writeResult           <-chan error
+	requestDone           <-chan struct{}
+	closeBudget           time.Duration
 }
 
 func newH2Tunnel(reader io.ReadCloser, writer io.WriteCloser, local, remote net.Addr, cancel context.CancelFunc, limit int) *h2Tunnel {
-	return &h2Tunnel{reader: reader, writer: writer, local: local, remote: remote, cancel: cancel, limit: limit, sendBuffer: make([]byte, limit+16), closeDone: make(chan struct{})}
+	return &h2Tunnel{reader: reader, writer: writer, local: local, remote: remote, cancel: cancel, limit: limit, closeDone: make(chan struct{})}
 }
 func (t *h2Tunnel) LocalAddr() net.Addr        { return t.local }
 func (t *h2Tunnel) RemoteAddr() net.Addr       { return t.remote }
@@ -159,10 +169,32 @@ func (t *h2Tunnel) Close() error {
 		t.writeTimer.Stop()
 	}
 	t.mu.Unlock()
+	var err error
+	if t.writeResult != nil {
+		err = t.writer.Close()
+		timer := time.NewTimer(t.closeBudget)
+		select {
+		case writeErr := <-t.writeResult:
+			select {
+			case <-t.requestDone:
+			default:
+				err = errors.Join(err, writeErr)
+			}
+		case <-t.requestDone:
+		case <-timer.C:
+			err = errors.Join(err, context.DeadlineExceeded)
+		}
+		timer.Stop()
+	}
 	t.cancel()
-	err := errors.Join(t.reader.Close(), t.writer.Close())
+	err = errors.Join(err, t.reader.Close(), t.writer.Close())
 	close(t.closeDone)
 	return err
+}
+
+func (t *h2Tunnel) abort() error {
+	t.cancel()
+	return t.Close()
 }
 
 // Expiring a client-side h2 deadline aborts this request, because http2.ClientConn
@@ -182,7 +214,7 @@ func (t *h2Tunnel) deadline(at time.Time, read bool) error {
 		*timer = nil
 	}
 	if !at.IsZero() {
-		*timer = time.AfterFunc(time.Until(at), func() { _ = t.Close() }) //nolint:errcheck // Cancellation cleanup cannot change the completed operation result.
+		*timer = time.AfterFunc(time.Until(at), func() { _ = t.abort() }) //nolint:errcheck // Cancellation cleanup cannot change the completed operation result.
 	}
 	return nil
 }
@@ -202,6 +234,9 @@ func (t *h2Tunnel) SendDatagram(ctx context.Context, payload []byte) error {
 	defer stop()
 	t.writeMu.Lock()
 	defer t.writeMu.Unlock()
+	if cap(t.sendBuffer) < len(payload)+16 {
+		t.sendBuffer = make([]byte, len(payload)+16)
+	}
 	return writeAll(t.writer, AppendCapsule(t.sendBuffer[:0], payload))
 }
 func (t *h2Tunnel) ReceiveDatagram(ctx context.Context, dst []byte) (int, error) {

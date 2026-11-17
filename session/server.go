@@ -114,7 +114,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "destination unavailable", http.StatusBadGateway)
 		return
 	}
-	stop := context.AfterFunc(r.Context(), func() { _ = target.Close() }) //nolint:errcheck // Cancellation cleanup cannot change the completed operation result.
+	// HTTP/3 request cancellation can end only the response direction. Relay owns stream errors.
+	stop := context.AfterFunc(peer.Context(), func() { _ = target.Close() }) //nolint:errcheck // Cancellation cleanup cannot change the completed operation result.
 	defer stop()
 	tunnel, err := transport.Accept(w, r, false, s.limits.MaxDatagram)
 	if err != nil {

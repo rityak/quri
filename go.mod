@@ -29,6 +29,6 @@ require (
 	golang.org/x/exp v0.0.0-20240904232852-e7e105dedf7e // indirect
 )
 
-replace github.com/metacubex/quic-go => github.com/rityak/quic-go v0.61.1-0.20261116090222-81fc43db6260
+replace github.com/metacubex/quic-go => github.com/rityak/quic-go v0.61.1-0.20261117054205-718b0410a157
 
 replace github.com/metacubex/http => github.com/rityak/http v0.1.9-0.20261115170447-fb1f316d86fc

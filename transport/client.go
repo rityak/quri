@@ -6,6 +6,7 @@ import (
 	"io"
 	"math/rand/v2"
 	"net"
+	"net/http/httptrace"
 	"net/netip"
 	"net/url"
 	"sync"
@@ -314,6 +315,13 @@ func (c *Conn) Open(ctx context.Context, target string, udp bool) (Tunnel, error
 	reader, writer := io.Pipe()
 	req.Body = reader
 	req.ContentLength = -1
+	writeResult := make(chan error, 1)
+	var wroteOnce sync.Once
+	req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{
+		WroteRequest: func(info httptrace.WroteRequestInfo) {
+			wroteOnce.Do(func() { writeResult <- info.Err })
+		},
+	}))
 	response, err := c.h2.RoundTrip(req)
 	if err != nil {
 		cancelRequest()
@@ -323,7 +331,11 @@ func (c *Conn) Open(ctx context.Context, target string, udp bool) (Tunnel, error
 		cancelRequest()
 		return nil, errors.Join(&TunnelError{Status: response.StatusCode}, response.Body.Close(), writer.Close())
 	}
-	return newH2Tunnel(response.Body, writer, c.raw.LocalAddr(), c.raw.RemoteAddr(), cancelRequest, c.limits.MaxDatagram), nil
+	tunnel := newH2Tunnel(response.Body, writer, c.raw.LocalAddr(), c.raw.RemoteAddr(), cancelRequest, c.limits.MaxDatagram)
+	// WroteRequest runs after DATA and END_STREAM are flushed to the connection.
+	tunnel.writeResult, tunnel.closeBudget = writeResult, c.limits.OpenTimeout
+	tunnel.requestDone = req.Context().Done()
+	return tunnel, nil
 }
 
 // Close aborts all streams and releases the owned transport and socket.

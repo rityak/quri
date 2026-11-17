@@ -23,6 +23,8 @@ github.com/rityak/http v0.1.9-0.20261115170447-fb1f316d86fc h1:t+KhQ15y+ik85BvMR
 github.com/rityak/http v0.1.9-0.20261115170447-fb1f316d86fc/go.mod h1:Nxx0zZAo2AhRfanyL+fmmK6ACMtVsfpwIl1aFAik2Eg=
 github.com/rityak/quic-go v0.61.1-0.20261116090222-81fc43db6260 h1:3IuToko/QdqKW7Q0GKhhgM0ohMZ1m6HCeon6HHv81UU=
 github.com/rityak/quic-go v0.61.1-0.20261116090222-81fc43db6260/go.mod h1:KTmibo7vZo0gCxdFWrPEQ/u/RGt92mJkrXDE2Qg2/AU=
+github.com/rityak/quic-go v0.61.1-0.20261117054205-718b0410a157 h1:1YT0Tpdb2NgmY1c70/ZFepMh+n8gw3j0cC/+znAKYok=
+github.com/rityak/quic-go v0.61.1-0.20261117054205-718b0410a157/go.mod h1:KTmibo7vZo0gCxdFWrPEQ/u/RGt92mJkrXDE2Qg2/AU=
 github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e h1:MRM5ITcdelLK2j1vwZ3Je0FKVCfqOLp5zO6trqMLYs0=
 github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e/go.mod h1:XV66xRDqSt+GTGFMVlhk3ULuV0y9ZmzeVGR4mloJI3M=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=

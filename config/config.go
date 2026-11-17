@@ -17,7 +17,7 @@ const (
 	DefaultMaxConnections     = 64
 	DefaultMaxStreams         = 64
 	DefaultMaxUDPTargets      = 32
-	DefaultMaxDatagram        = 1150
+	DefaultMaxDatagram        = 65507 // H3 additionally enforces its current path MTU.
 	DefaultConnectionIDLength = 8
 	DefaultMaxControl         = 1 << 20
 	DefaultQueueSize          = 16
