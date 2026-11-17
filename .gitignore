@@ -5,3 +5,7 @@ go.work.sum
 *.key
 examples/*.pem
 examples/*.local.json
+/dist/
+__pycache__/
+/mirayintegration/quri-relay
+/mirayintegration/quri-relay.exe

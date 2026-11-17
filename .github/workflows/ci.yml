@@ -1,0 +1,88 @@
+name: Go checks
+on:
+  push:
+    branches-ignore: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: true
+      - run: go test -race ./... -count=1 -timeout=3m
+      - run: go vet ./...
+      - run: go test ./transport -run '^$' -bench 'Benchmark(DatagramCodec|CapsuleDecode)' -benchmem
+      - run: go test ./route -run '^$' -bench BenchmarkDirectUDPRoundTrip -benchmem
+      - run: go test ./session -run '^$' -bench BenchmarkUDPRoundTrip -benchtime=1000x -benchmem
+      - name: Fuzz binary parsers
+        # Count-based budgets avoid the duration-expiry race in golang/go#75804.
+        run: |
+          go test ./transport -run '^$' -fuzz '^FuzzDatagram$' -fuzztime=100000x
+          go test ./transport -run '^$' -fuzz '^FuzzCapsule$' -fuzztime=100000x
+          go test ./client -run '^$' -fuzz '^FuzzProfileLink$' -fuzztime=100000x
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: true
+      - run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
+      - run: golangci-lint config verify
+      - run: golangci-lint run ./...
+  integration:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module: [interop, mirayintegration]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: quri
+      - uses: actions/checkout@v4
+        if: matrix.module == 'mirayintegration'
+        with:
+          repository: rityak/miray
+          ref: 9451b8cb0ad5ca88de14b5e3361e736204ccac7e
+          path: miray
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache-dependency-path: quri/${{ matrix.module }}/go.sum
+      - run: go test -race ./... -count=1 -timeout=3m
+        working-directory: quri/${{ matrix.module }}
+      - run: go mod tidy -diff
+        working-directory: quri/${{ matrix.module }}
+      - name: Build and smoke-test the Linux installer
+        if: matrix.module == 'mirayintegration'
+        working-directory: quri
+        run: |
+          python3 deploy/build.py --output "$RUNNER_TEMP/quri-package"
+          cd "$RUNNER_TEMP/quri-package"
+          sha256sum -c quri-relay-linux-amd64.tar.gz.sha256
+          mkdir unpacked
+          tar -xzf quri-relay-linux-amd64.tar.gz -C unpacked
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          config = {"mode":"server","listen":"127.0.0.1:3443","domain":"relay.example","acme_cache":"/var/lib/quri-relay/acme","website":"http://127.0.0.1:8080","token":"installer-ci-credential-0123456789abcdef","allow":["127.0.0.0/8"]}
+          Path("server.json").write_text(json.dumps(config))
+          PY
+          unpacked/install.sh --config server.json --no-start --prefix "$RUNNER_TEMP/quri-install"
+          test -x "$RUNNER_TEMP/quri-install/usr/local/bin/quri-relay"
+          test -f "$RUNNER_TEMP/quri-install/etc/systemd/system/quri-relay.service"
+          if unpacked/install.sh --config server.json --no-start --prefix "$RUNNER_TEMP/../invalid"; then exit 1; fi
+      - uses: actions/upload-artifact@v4
+        if: matrix.module == 'mirayintegration'
+        with:
+          name: quri-relay-linux-amd64
+          path: ${{ runner.temp }}/quri-package/*.gz*

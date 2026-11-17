@@ -3,6 +3,7 @@ module github.com/rityak/quri/mirayintegration
 go 1.26.0
 
 require (
+	github.com/metacubex/http v0.1.8
 	github.com/metacubex/mihomo v0.0.0
 	github.com/rityak/quri v0.0.0
 )
@@ -58,7 +59,6 @@ require (
 	github.com/metacubex/gvisor v0.0.0-20260922041103-e2cbcd6e7400 // indirect
 	github.com/metacubex/hkdf v0.1.0 // indirect
 	github.com/metacubex/hpke v0.1.0 // indirect
-	github.com/metacubex/http v0.1.8 // indirect
 	github.com/metacubex/jls-quic-go v0.0.0-20260727080412-732f2fc9a34d // indirect
 	github.com/metacubex/jls-tls v0.0.0-20260723084315-67adc0e2f796 // indirect
 	github.com/metacubex/jsonv2 v0.0.0-20260721082349-16b4998c8f89 // indirect
@@ -105,6 +105,7 @@ require (
 	github.com/sina-ghaderi/rabaead v0.0.0-20220730151906-ab6e06b96e8c // indirect
 	github.com/sina-ghaderi/rabbitio v0.0.0-20220730151941-9ce26f4f872e // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e // indirect
 	github.com/tailscale/certstore v0.1.1-0.20260409135935-3638fb84b77d // indirect
 	github.com/tailscale/go-winio v0.0.0-20231025203758-c4f33415bf55 // indirect
 	github.com/tailscale/hujson v0.0.0-20221223112325-20486734a56a // indirect
@@ -148,7 +149,7 @@ replace github.com/metacubex/smux => github.com/rityak/smux v0.0.0-2026101509503
 
 replace github.com/metacubex/utls => github.com/rityak/utls v0.0.0-20261015104218-792958f984ea
 
-replace github.com/metacubex/quic-go => github.com/rityak/quic-go v0.61.1-0.20261115102657-a6ba8bb51c89
+replace github.com/metacubex/quic-go => github.com/rityak/quic-go v0.61.1-0.20261117054205-718b0410a157
 
 replace github.com/metacubex/sing-quic => github.com/rityak/sing-quic v0.0.0-20261115102827-bd034150c9e2
 
@@ -157,3 +158,5 @@ replace github.com/metacubex/sing-shadowsocks => github.com/rityak/sing-shadowso
 replace github.com/metacubex/sing-shadowsocks2 => github.com/rityak/sing-shadowsocks2 v0.2.9-0.20261017012153-da4a7a72dbf5
 
 replace github.com/metacubex/sing => github.com/rityak/sing v0.5.9-0.20261115102824-a08acaf1b035
+
+replace github.com/metacubex/http => github.com/rityak/http v0.1.9-0.20261115170447-fb1f316d86fc
