@@ -68,7 +68,7 @@ func (t *h3Tunnel) CloseWrite() error {
 }
 func (t *h3Tunnel) Close() error {
 	// A past deadline unblocks a concurrent Write without discarding accepted data.
-	_ = t.h3Stream.SetWriteDeadline(time.Now())
+	_ = t.h3Stream.SetWriteDeadline(time.Now()) //nolint:errcheck // An already closed stream still needs receive-side cleanup.
 	if !t.writeClosed.Load() {
 		if err := t.CloseWrite(); err != nil {
 			t.CancelWrite(quic.StreamErrorCode(0x10c))

@@ -45,15 +45,17 @@ func TestHTTPRelayTCPAndUDP(t *testing.T) {
 						targetDone <- err
 						return
 					}
-					_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+					if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+						targetDone <- errors.Join(err, conn.Close())
+						return
+					}
 					if transfer == 1 {
 						_, err = io.WriteString(conn, "server-fin")
 						if err == nil {
 							err = conn.(*net.TCPConn).CloseWrite()
 						}
 						if err != nil {
-							_ = conn.Close()
-							targetDone <- err
+							targetDone <- errors.Join(err, conn.Close())
 							return
 						}
 					}
@@ -219,7 +221,7 @@ func TestHTTPRelayTCPAndUDP(t *testing.T) {
 			}
 			if protocol == "h2" {
 				for _, size := range []int{1200, 1350, 8192, 65507} {
-					payload := bytes.Repeat([]byte{byte(size)}, size)
+					payload := bytes.Repeat([]byte{0xa5}, size)
 					if _, err := packet.WriteTo(payload, targetUDP.LocalAddr()); err != nil {
 						t.Fatalf("WriteTo(%d bytes): %v", size, err)
 					}
